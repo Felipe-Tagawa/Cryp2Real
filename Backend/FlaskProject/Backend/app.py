@@ -4,7 +4,7 @@ from flask_cors import CORS
 from Backend.FlaskProject.Backend.deploy_contract import receipt
 from Backend.FlaskProject.Backend.deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, new_ether_abi
 from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl
-from Backend.FlaskProject.Backend.blockchain import w3, admWallet, private_key, merchantWallet
+from Backend.FlaskProject.Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
 import time
 
 if w3.is_connected():
