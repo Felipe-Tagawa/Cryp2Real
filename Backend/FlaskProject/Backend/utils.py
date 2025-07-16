@@ -1,6 +1,6 @@
 # Funções auxiliares
 
-from my_blockchain import w3
+from Backend.FlaskProject.Backend.my_blockchain import w3
 import requests
 
 # Função de lista de todas as contas:
