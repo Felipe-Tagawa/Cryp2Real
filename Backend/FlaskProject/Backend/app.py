@@ -1,10 +1,14 @@
+import os
+
 from eth_account import Account
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from Backend.FlaskProject.Backend.deploy_contract import receipt
 from Backend.FlaskProject.Backend.deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, new_ether_abi
-from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl
+from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
 from Backend.FlaskProject.Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
+from flask import send_file
+from Backend.FlaskProject.Backend.utils import gerar_qrcode
 
 if w3.is_connected():
     print("Conectado com sucesso ao Ganache!")
@@ -356,6 +360,15 @@ def getMerchantSaldo():
         "saldo_eth": format(saldo_eth, '.6f'),      # 6 casas decimais
         "saldo_reais": format(saldo_brl, '.2f')    # 2 casas decimais
     })
+
+@app.route("/qrcode-registro")
+def criar_qrcode_registro():
+    url = "https://cryp2real.flutterflow.app/register"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    caminho_relativo = qr_degrade(url)  # retorna caminho relativo 'static/qrcodes/qrcode_degrade.png'
+    caminho_absoluto = os.path.join(base_dir, caminho_relativo)
+    print(f"Enviando arquivo: {caminho_absoluto}")
+    return send_file(caminho_absoluto, mimetype='image/png')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
