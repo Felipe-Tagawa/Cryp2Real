@@ -3,8 +3,8 @@ import os
 from web3 import Web3
 from solcx import compile_source, install_solc
 from dotenv import load_dotenv
-from blockchain import PRIVATE_KEY, GANACHE_URL, admWallet
-from utils import extract_interface, sign_n_send
+from Backend.FlaskProject.Backend.my_blockchain import PRIVATE_KEY, GANACHE_URL, admWallet
+from Backend.FlaskProject.Backend.utils import extract_interface, sign_n_send
 
 # Carregar variáveis de ambiente
 load_dotenv()
