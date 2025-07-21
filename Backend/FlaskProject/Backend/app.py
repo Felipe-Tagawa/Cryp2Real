@@ -5,7 +5,6 @@ from Backend.FlaskProject.Backend.deploy_contract import receipt
 from Backend.FlaskProject.Backend.deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, new_ether_abi
 from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl
 from Backend.FlaskProject.Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
-import time
 
 if w3.is_connected():
     print("Conectado com sucesso ao Ganache!")
@@ -92,9 +91,6 @@ def registro_cliente():
     signed_transfer = w3.eth.account.sign_transaction(transfer_tx, private_key)
     w3.eth.send_raw_transaction(signed_transfer.raw_transaction)
 
-    # Aguardar a transação de transferência
-    time.sleep(2)
-
     nonce = w3.eth.get_transaction_count(carteiraUsuario)
 
     transaction = sistema_cliente.functions.registrarCliente(
@@ -115,6 +111,47 @@ def registro_cliente():
             "carteira": carteiraUsuario,
             "transacao": receipt["transactionHash"].hex()
         })
+
+# Login de usuário:
+@app.route("/loginClient", methods=["POST"])
+def loginCliente():
+    data = request.get_json()
+    print("JSON parseado:", data)
+
+    email = data.get("email", "").strip()
+    senha = data.get("senha", "").strip()
+
+    if not email or not senha:
+        return jsonify({"erro": "Email e senha são obrigatórios!"}), 400
+
+    try:
+        # Chamada ao contrato para autenticar cliente
+        autenticado, carteira = sistema_cliente.functions.autenticarCliente(email, senha).call()
+
+        if not autenticado:
+            return jsonify({"erro": "Credenciais inválidas!"}), 401
+
+        carteira_checksum = w3.to_checksum_address(carteira)
+
+        # Verifica se o cliente está registrado localmente (ou seja, foi registrado no dicionário `contas_usuarios`)
+        cliente_info = None
+        for referenciaPix, info in contas_usuarios.items():
+            if info['email'] == email and w3.to_checksum_address(info['address']) == carteira_checksum:
+                cliente_info = info
+                break
+
+        if not cliente_info:
+            return jsonify({"erro": "Endereço da carteira não corresponde ou cliente não está registrado localmente"}), 401
+
+        return jsonify({
+            "status": "Login bem-sucedido!",
+            "carteira": carteira_checksum,
+            "email": email
+        })
+
+    except Exception as e:
+        print("Erro ao autenticar:", str(e))
+        return jsonify({"erro": f"Erro interno ao tentar login: {str(e)}"}), 500
 
 # Mostra as infos do cliente:
 @app.route("/mostraInfoCliente", methods=["GET"])
