@@ -32,9 +32,9 @@ def run():  # put application's code here
 
 @app.route("/registrarCliente", methods=["POST"])
 def registro_cliente():
-    print("\n=== DADOS RECEBIDOS ===")
-    print("Headers:", request.headers)
-    print("Corpo (raw):", request.data)  # Verifique se os dados chegam
+    #print("\n=== DADOS RECEBIDOS ===")
+    #print("Headers:", request.headers)
+    #print("Corpo (raw):", request.data)  # Verifique se os dados chegam
 
     data = request.get_json()
     print("JSON parseado:", data)  # Confira se o JSON foi interpretado
@@ -43,10 +43,15 @@ def registro_cliente():
     if not data:
         return jsonify({"erro": "Dados JSON não fornecidos"}), 400
 
-    nome = data.get("nome")
-    referenciaPix = data.get("referenciaPix")
-    email = data.get("email")
-    senha = data.get("senha")
+    nome = data.get("nome", "").strip()
+    referenciaPix = data.get("referenciaPix", "").strip()
+    email = data.get("email", "").strip()
+    senha = data.get("senha", "").strip()
+
+    print("Nome:", nome)
+    print("Referencia Pix:", referenciaPix)
+    print("Email:", email)
+    print("Senha:", senha)
 
     # Validações básicas
     if not nome or len(nome.strip()) < 2:
@@ -65,12 +70,6 @@ def registro_cliente():
     nova_conta = Account.create() # Esse method cria uma conta com um endereço aleatório(sem relação com o Ganache)
     carteiraUsuario = nova_conta.address
     private_key_user = nova_conta.key.hex()
-
-        # Armazenar a conta por email
-        #contas_usuarios[email] = {
-        #    'address': carteiraUsuario,
-        #    'private_key': private_key_user
-        #}
 
     # Salvando a conta por referenciaPix (IMPORTANTE: uso na realizaPagamento p/ busca de qual cliente irá fazer a transferência)
     contas_usuarios[referenciaPix] = {
