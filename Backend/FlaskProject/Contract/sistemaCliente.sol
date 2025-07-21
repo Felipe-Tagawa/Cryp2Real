@@ -48,8 +48,8 @@ contract SistemaCliente {
         require(bytes(_referenciaPix).length > 0, "Referencia PIX invalida!");
         require(bytes(email).length > 0, "Email invalido!");
         require(bytes(senha).length >= 6, "Senha deve ter pelo menos 6 caracteres!");
-        require(pixCliente[_referenciaPix] == address(0), "Referencia Pix ja utilizada anteriormente!");
-        require(emailCliente[email] == address(0), "Email ja utilizado anteriormente!");
+        // require(pixCliente[_referenciaPix] == address(0), "Referencia Pix ja utilizada anteriormente!");
+        // require(emailCliente[email] == address(0), "Email ja utilizado anteriormente!");
 
         bytes32 senhaHash = gerarHashSenha(senha, msg.sender);
 
