@@ -15,8 +15,13 @@ def sign_n_send(tx, private_key):
     signed_tx = w3.eth.account.sign_transaction(tx, private_key)
     tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
     print(f"Transação enviada. Hash: {tx_hash.hex()}")
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-    return receipt
+    try:
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=10)
+        return receipt
+    except Exception as e:
+        print("Erro ao aguardar confirmação da transação:", e)
+        return None
+
 
 # Função de integração do contrato Solidity com Python
 def extract_interface(compiled_contracts, contract_name):

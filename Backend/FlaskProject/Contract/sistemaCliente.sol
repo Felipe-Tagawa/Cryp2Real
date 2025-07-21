@@ -42,21 +42,20 @@ contract SistemaCliente {
         string memory nome,
         string memory _referenciaPix,
         string memory email,
-        string memory senha
-    ) public {
+        string memory senha) public {
         require(!clientes[msg.sender].registrado, "Cliente ja registrado!");
         require(bytes(_referenciaPix).length > 0, "Referencia PIX invalida!");
         require(bytes(email).length > 0, "Email invalido!");
         require(bytes(senha).length >= 6, "Senha deve ter pelo menos 6 caracteres!");
-        require(pixCliente[_referenciaPix] == address(0), "Referencia Pix ja utilizada anteriormente!");
-        require(emailCliente[email] == address(0), "Email ja utilizado anteriormente!");
+        // require(pixCliente[_referenciaPix] == address(0), "Referencia Pix ja utilizada anteriormente!");
+        // require(emailCliente[email] == address(0), "Email ja utilizado anteriormente!");
 
         bytes32 senhaHash = gerarHashSenha(senha, msg.sender);
 
         clientes[msg.sender] = Cliente({
             carteira: msg.sender,
             nome: nome,
-            saldo: 0,
+            saldo: 10,
             registrado: true,
             referenciaPix: _referenciaPix,
             email: email,
@@ -68,6 +67,10 @@ contract SistemaCliente {
         emailCliente[email] = msg.sender;
 
         emit novoClienteRegistrado(msg.sender, nome, _referenciaPix, email);
+    }
+
+    function getEnderecoPorEmail(string memory email) public view returns (address) {
+    return emailCliente[email];
     }
 
     function getEnderecoPorPix(string memory _referenciaPix) public view returns (address) {
