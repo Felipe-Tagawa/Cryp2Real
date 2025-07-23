@@ -9,6 +9,7 @@ from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get
 from Backend.FlaskProject.Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
 from flask import send_file
 from Backend.FlaskProject.Backend.utils import gerar_qrcode
+from flask_sqlalchemy import SQLAlchemy
 
 if w3.is_connected():
     print("Conectado com sucesso ao Ganache!")
@@ -27,6 +28,20 @@ contas_usuarios = {}
 
 app = Flask(__name__)
 CORS(app) # Permite requisições
+
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+class Cliente(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    senha = db.Column(db.String(100), nullable=False)
+    referenciaPix = db.Column(db.String(100), unique=True, nullable=False)
+    carteira = db.Column(db.String(42), nullable=False)
+    private_key = db.Column(db.Text, nullable=False)  # ou encriptada
+
 @app.route('/')
 def run():  # put application's code here
     return 'API funcionando com sucesso!'
@@ -35,86 +50,102 @@ def run():  # put application's code here
 
 @app.route("/registrarCliente", methods=["POST"])
 def registro_cliente():
-    #print("\n=== DADOS RECEBIDOS ===")
-    #print("Headers:", request.headers)
-    #print("Corpo (raw):", request.data)  # Verifique se os dados chegam
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"erro": "Dados JSON não fornecidos"}), 400
 
-    data = request.get_json()
-    print("JSON parseado:", data)  # Confira se o JSON foi interpretado
+        nome = data.get("nome", "").strip()
+        referenciaPix = data.get("referenciaPix", "").strip()
+        email = data.get("email", "").strip()
+        senha = data.get("senha", "").strip()
 
+        if not nome or len(nome) < 2:
+            return jsonify({"erro": "Nome deve ter pelo menos 2 caracteres"}), 400
+        if not referenciaPix:
+            return jsonify({"erro": "Referência PIX não pode estar vazia"}), 400
+        if not email:
+            return jsonify({"erro": "Email é obrigatório"}), 400
+        if not senha or len(senha) < 6:
+            return jsonify({"erro": "Senha deve ter pelo menos 6 caracteres"}), 400
 
-    if not data:
-        return jsonify({"erro": "Dados JSON não fornecidos"}), 400
+        nova_conta = Account.create()
+        carteiraUsuario = nova_conta.address
+        private_key_user = nova_conta.key.hex()
 
-    nome = data.get("nome", "").strip()
-    referenciaPix = data.get("referenciaPix", "").strip()
-    email = data.get("email", "").strip()
-    senha = data.get("senha", "").strip()
+        contas_usuarios[referenciaPix] = {
+            'address': carteiraUsuario,
+            'private_key': private_key_user,
+            'email': email
+        }
 
-    print("Nome:", nome)
-    print("Referencia Pix:", referenciaPix)
-    print("Email:", email)
-    print("Senha:", senha)
+        # Transferência de ETH
+        transfer_nonce = w3.eth.get_transaction_count(admWallet)
+        transfer_tx = {
+            'to': carteiraUsuario,
+            'value': w3.to_wei(0.1, 'ether'),
+            'gas': 21000,
+            'gasPrice': w3.eth.gas_price,
+            'nonce': transfer_nonce,
+            'chainId': w3.eth.chain_id
+        }
 
-    # Validações básicas
-    if not nome or len(nome.strip()) < 2:
-        return jsonify({"erro": "Nome deve ter pelo menos 2 caracteres"}), 400
+        signed_transfer = w3.eth.account.sign_transaction(transfer_tx, private_key)
+        w3.eth.send_raw_transaction(signed_transfer.raw_transaction)
 
-    if not referenciaPix or len(referenciaPix.strip()) < 1:
-        return jsonify({"erro": "Referência PIX não pode estar vazia"}), 400
-
-    if not email:
-        return jsonify({"erro": "Email é obrigatório"}), 400
-
-    if not senha or len(senha) < 6:
-        return jsonify({"erro": "Senha deve ter pelo menos 6 caracteres"}), 400
-
-    # Criar nova conta para o usuário
-    nova_conta = Account.create() # Esse method cria uma conta com um endereço aleatório(sem relação com o Ganache)
-    carteiraUsuario = nova_conta.address
-    private_key_user = nova_conta.key.hex()
-
-    # Salvando a conta por referenciaPix (IMPORTANTE: uso na realizaPagamento p/ busca de qual cliente irá fazer a transferência)
-    contas_usuarios[referenciaPix] = {
-        'address': carteiraUsuario,
-        'private_key': private_key_user,
-        'email': email
-    }
-
-    # Transferir alguns ETH para a nova conta
-    transfer_nonce = w3.eth.get_transaction_count(admWallet)
-    transfer_tx = {
-        'to': carteiraUsuario,
-        'value': w3.to_wei(0.1, 'ether'),
-        'gas': 21000,
-        'gasPrice': w3.eth.gas_price,
-        'nonce': transfer_nonce,
-        'chainId': w3.eth.chain_id
-    }
-
-    signed_transfer = w3.eth.account.sign_transaction(transfer_tx, private_key)
-    w3.eth.send_raw_transaction(signed_transfer.raw_transaction)
-
-    nonce = w3.eth.get_transaction_count(carteiraUsuario)
-
-    transaction = sistema_cliente.functions.registrarCliente(
+        nonce = w3.eth.get_transaction_count(carteiraUsuario)
+        tx = sistema_cliente.functions.registrarCliente(
             nome, referenciaPix, email, senha
-        ).build_transaction(
-            {
-                "gasPrice": w3.eth.gas_price,
-                "chainId": w3.eth.chain_id,
-                "from": carteiraUsuario,
-                "nonce": nonce,
-            }
+        ).build_transaction({
+            "from": carteiraUsuario,
+            "nonce": nonce,
+            "gas": 300000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": w3.eth.chain_id
+        })
+
+        receipt = sign_n_send(tx, private_key_user)
+
+        # Adiciona saldo de R$10
+        cotacao = get_eth_to_brl()
+        valor_eth = 10.0 / cotacao
+        valor_wei = w3.to_wei(valor_eth, 'ether')
+
+        bonus_nonce = w3.eth.get_transaction_count(admWallet)
+        bonus_tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
+            "from": admWallet,
+            "nonce": bonus_nonce,
+            "gas": 300000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": w3.eth.chain_id
+        })
+
+        bonus_receipt = sign_n_send(bonus_tx, private_key)
+
+        novoCliente = Cliente(
+            nome=nome,
+            referenciaPix=referenciaPix,
+            email=email,
+            senha=senha,
+            carteira=carteiraUsuario,
+            private_key=private_key_user
         )
 
-    transaction_hash = sign_n_send(transaction, private_key_user)
+        db.session.add(novoCliente)
+        db.session.commit()
 
-    return jsonify({
-            "status": "Usuário registrado com sucesso!",
+        return jsonify({
+            "status": "Usuário registrado com sucesso e saldo de R$10,00 adicionado!",
             "carteira": carteiraUsuario,
-            "transacao": receipt["transactionHash"].hex()
+            "tx_registro": receipt["transactionHash"].hex(),
+            "tx_bonus": bonus_receipt["transactionHash"].hex()
         })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()  # imprime erro completo no terminal
+        return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
+
 
 # Login de usuário:
 @app.route("/loginClient", methods=["POST"])
@@ -211,62 +242,59 @@ def mostraInfoCliente():
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar informações do cliente: {str(e)}"}), 500
 
+# URGENTE URGENTÍSSIMO: Apenas para adicionar saldo no cadastro ou login:
 @app.route("/adicionaSaldo", methods=["POST"])
 def adicionaSaldo():
-    data = request.get_json()
-    if not data:
-        return jsonify({"erro": "Dados JSON não fornecidos"}), 400
-
-    endereco_cliente = data.get("carteira")
-    valor_reais = data.get("valor_reais")
-
-    # Validação básica
-    if not endereco_cliente:
-        return jsonify({"erro": "Endereço da carteira é obrigatório!"}), 400
-    if not w3.is_address(endereco_cliente):
-        return jsonify({"erro": "Endereço inválido!"}), 400
-
     try:
-        valor_reais = float(valor_reais)
-        if valor_reais <= 0:
-            return jsonify({"erro": "Valor deve ser maior que zero"}), 400
-    except (ValueError, TypeError):
-        return jsonify({"erro": "Valor inválido. Deve ser um número positivo."}), 400
+        data = request.get_json()
+        if not data:
+            return jsonify({"erro": "Dados JSON não fornecidos"}), 400
 
-    # Obter cotação atual do ETH em BRL usando função utilitária
-    try:
-        cotacao = get_eth_to_brl()
+        referenciaPix = data.get("referenciaPix")
+        valor_reais = data.get("valor_reais")
+
+        if not referenciaPix:
+            return jsonify({"erro": "Referencia Pix não fornecida"}), 400
+
+        try:
+            valor_reais = float(valor_reais)
+            if valor_reais <= 0:
+                return jsonify({"erro": "Valor deve ser maior que zero"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"erro": "Valor inválido. Deve ser um número positivo."}), 400
+
+        try:
+            cotacao = get_eth_to_brl()
+        except Exception as e:
+            return jsonify({"erro": f"Erro ao buscar cotação: {str(e)}"}), 500
+
+        valor_eth = valor_reais / cotacao
+        valor_wei = w3.to_wei(valor_eth, 'ether')
+
+        nonce = w3.eth.get_transaction_count(admWallet)
+        tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
+            "from": admWallet,
+            "nonce": nonce,
+            "gas": 300000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": w3.eth.chain_id
+        })
+
+        receipt = sign_n_send(tx, private_key)
+
+        return jsonify({
+            "status": "Saldo adicionado com sucesso!",
+            "tx_hash": receipt["transactionHash"].hex(),
+            "valor_reais": valor_reais,
+            "valor_eth": valor_eth,
+            "valor_wei": valor_wei,
+            "cotacao_eth_brl": cotacao
+        })
+
     except Exception as e:
-        return jsonify({"erro": f"Erro ao buscar cotação: {str(e)}"}), 500
-
-    # Converter BRL -> ETH -> WEI
-    valor_eth = valor_reais / cotacao
-    valor_wei = w3.to_wei(valor_eth, 'ether')
-
-    endereco_cliente = w3.to_checksum_address(endereco_cliente)
-    nonce = w3.eth.get_transaction_count(admWallet)
-
-    # Construir a transação
-    tx = sistema_cliente.functions.adicionarSaldo(endereco_cliente, valor_wei).build_transaction({
-        "from": admWallet,
-        "nonce": nonce,
-        "gas": 300000,
-        "gasPrice": w3.eth.gas_price,
-        "chainId": w3.eth.chain_id
-    })
-
-    # Assinar e enviar
-    receipt = sign_n_send(tx, private_key)
-
-    return jsonify({
-        "status": "Saldo adicionado com sucesso!",
-        "tx_hash": receipt["transactionHash"].hex(),
-        "valor_reais": valor_reais,
-        "valor_eth": valor_eth,
-        "valor_wei": valor_wei,
-        "cotacao_eth_brl": cotacao
-    })
-
+        import traceback
+        traceback.print_exc()
+        return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():
@@ -371,4 +399,6 @@ def criar_qrcode_registro():
     return send_file(caminho_absoluto, mimetype='image/png')
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
     app.run(host='0.0.0.0', port=5000)
