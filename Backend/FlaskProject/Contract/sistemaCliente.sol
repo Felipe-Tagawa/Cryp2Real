@@ -78,7 +78,8 @@ contract SistemaCliente {
     }
 
     // Apenas para testar:
-    function adicionarSaldo(address cliente, uint valor) public {
+    function adicionarSaldo(string memory referenciaPix, uint valor) public {
+        address cliente = pixParaEndereco[referenciaPix];
         require(clientes[cliente].registrado, "Cliente nao registrado");
         clientes[cliente].saldo += valor;
     }

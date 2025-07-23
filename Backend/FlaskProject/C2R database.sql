@@ -1,5 +1,6 @@
 -- Schema MySQL para Sistema Cliente Blockchain
 -- Criação do banco de dados
+DROP DATABASE IF EXISTS sistema_blockchain_cliente;
 CREATE DATABASE IF NOT EXISTS sistema_blockchain_cliente;
 USE sistema_blockchain_cliente;
 
@@ -22,6 +23,28 @@ CREATE TABLE clientes (
     INDEX idx_pix (referencia_pix),
     INDEX idx_email (email)
 );
+
+CREATE TABLE IF NOT EXISTS transacao (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    valor_pagamento DECIMAL(10,2) NOT NULL COMMENT 'Valor do pagamento em reais',
+    descricao VARCHAR(255) NULL COMMENT 'Descrição opcional da transação',
+    beneficiado VARCHAR(100) NOT NULL COMMENT 'Nome do beneficiado do pagamento',
+    data_transacao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora da transação',
+    hash_transacao VARCHAR(66) NOT NULL COMMENT 'Hash da transação na blockchain',
+    cliente_id INT NOT NULL COMMENT 'ID do cliente que realizou a transação',
+
+    -- Índices para melhor performance
+    INDEX idx_cliente_id (cliente_id),
+    INDEX idx_data_transacao (data_transacao),
+    INDEX idx_hash_transacao (hash_transacao),
+
+    -- Chave estrangeira
+    CONSTRAINT fk_transacao_cliente
+        FOREIGN KEY (cliente_id)
+        REFERENCES clientes(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Tabela de transações PIX dos clientes';
 
 -- Tabela de Comerciantes
 CREATE TABLE comerciantes (

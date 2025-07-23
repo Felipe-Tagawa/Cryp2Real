@@ -1,10 +1,18 @@
+import os
+from datetime import datetime
+
 from eth_account import Account
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
+
 from Backend.FlaskProject.Backend.deploy_contract import receipt
-from Backend.FlaskProject.Backend.deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, new_ether_abi
-from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl
+from Backend.FlaskProject.Backend.deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, \
+    new_ether_abi
+from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
 from Backend.FlaskProject.Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
+from flask import send_file
+from Backend.FlaskProject.Backend.utils import gerar_qrcode
 
 if w3.is_connected():
     print("Conectado com sucesso ao Ganache!")
@@ -22,22 +30,53 @@ print(merchantWallet)
 contas_usuarios = {}
 
 app = Flask(__name__)
-CORS(app) # Permite requisições
+CORS(app)  # Permite requisições
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:zSh3rl0cK$20@localhost/sistema_blockchain_cliente'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+
+class Cliente(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    senha = db.Column(db.String(100), nullable=False)
+    referenciaPix = db.Column(db.String(100), unique=True, nullable=False)
+    carteira = db.Column(db.String(42), nullable=False)
+    private_key = db.Column(db.Text, nullable=False)  # ou encriptada
+
+    # Relacionamento com transações
+    transacoes = db.relationship('Transacao', backref='cliente', lazy=True)
+
+
+class Transacao(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    valor_pagamento = db.Column(db.Double, nullable=False)  # Valor em reais
+    descricao = db.Column(db.String(255), nullable=True)  # Descrição opcional
+    beneficiado = db.Column(db.String(100), nullable=False)  # Nome do beneficiado
+    data_transacao = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    hash_transacao = db.Column(db.String(66), nullable=False)  # Hash da transação blockchain
+
+    # Chave estrangeira para o cliente
+    cliente_id = db.Column(db.Integer, db.ForeignKey('cliente.id'), nullable=False)
+
+    def _repr_(self):
+        return f'<Transacao {self.id}: R${self.valor_pagamento} para {self.beneficiado}>'
 @app.route('/')
 def run():  # put application's code here
     return 'API funcionando com sucesso!'
+
 
 # Registrar um novo cliente:
 
 @app.route("/registrarCliente", methods=["POST"])
 def registro_cliente():
-    #print("\n=== DADOS RECEBIDOS ===")
-    #print("Headers:", request.headers)
-    #print("Corpo (raw):", request.data)  # Verifique se os dados chegam
+    # print("\n=== DADOS RECEBIDOS ===")
+    # print("Headers:", request.headers)
+    # print("Corpo (raw):", request.data)  # Verifique se os dados chegam
 
     data = request.get_json()
     print("JSON parseado:", data)  # Confira se o JSON foi interpretado
-
 
     if not data:
         return jsonify({"erro": "Dados JSON não fornecidos"}), 400
@@ -66,7 +105,7 @@ def registro_cliente():
         return jsonify({"erro": "Senha deve ter pelo menos 6 caracteres"}), 400
 
     # Criar nova conta para o usuário
-    nova_conta = Account.create() # Esse method cria uma conta com um endereço aleatório(sem relação com o Ganache)
+    nova_conta = Account.create()  # Esse method cria uma conta com um endereço aleatório(sem relação com o Ganache)
     carteiraUsuario = nova_conta.address
     private_key_user = nova_conta.key.hex()
 
@@ -94,23 +133,77 @@ def registro_cliente():
     nonce = w3.eth.get_transaction_count(carteiraUsuario)
 
     transaction = sistema_cliente.functions.registrarCliente(
-            nome, referenciaPix, email, senha
-        ).build_transaction(
-            {
-                "gasPrice": w3.eth.gas_price,
-                "chainId": w3.eth.chain_id,
-                "from": carteiraUsuario,
-                "nonce": nonce,
-            }
-        )
+        nome, referenciaPix, email, senha
+    ).build_transaction(
+        {
+            "gasPrice": w3.eth.gas_price,
+            "chainId": w3.eth.chain_id,
+            "from": carteiraUsuario,
+            "nonce": nonce,
+        }
+    )
 
     transaction_hash = sign_n_send(transaction, private_key_user)
 
+    novoCliente = Cliente(nome=nome,
+                          referenciaPix=referenciaPix,
+                          email=email,
+                          senha=senha,
+                          carteira=carteiraUsuario,
+                          private_key=private_key_user)
+
+    db.session.add(novoCliente)
+    db.session.commit()
+
     return jsonify({
-            "status": "Usuário registrado com sucesso!",
-            "carteira": carteiraUsuario,
-            "transacao": receipt["transactionHash"].hex()
+        "status": "Usuário registrado com sucesso!",
+        "carteira": carteiraUsuario,
+        "transacao": receipt["transactionHash"].hex()
+    })
+
+
+# Login de usuário:
+@app.route("/loginClient", methods=["POST"])
+def loginCliente():
+    data = request.get_json()
+    print("JSON parseado:", data)
+
+    email = data.get("email", "").strip()
+    senha = data.get("senha", "").strip()
+
+    if not email or not senha:
+        return jsonify({"erro": "Email e senha são obrigatórios!"}), 400
+
+    try:
+        # Chamada ao contrato para autenticar cliente
+        autenticado, carteira = sistema_cliente.functions.autenticarCliente(email, senha).call()
+
+        if not autenticado:
+            return jsonify({"erro": "Credenciais inválidas!"}), 401
+
+        carteira_checksum = w3.to_checksum_address(carteira)
+
+        # Verifica se o cliente está registrado localmente (ou seja, foi registrado no dicionário contas_usuarios)
+        cliente_info = None
+        for referenciaPix, info in contas_usuarios.items():
+            if info['email'] == email and w3.to_checksum_address(info['address']) == carteira_checksum:
+                cliente_info = info
+                break
+
+        if not cliente_info:
+            return jsonify(
+                {"erro": "Endereço da carteira não corresponde ou cliente não está registrado localmente"}), 401
+
+        return jsonify({
+            "status": "Login bem-sucedido!",
+            "carteira": carteira_checksum,
+            "email": email
         })
+
+    except Exception as e:
+        print("Erro ao autenticar:", str(e))
+        return jsonify({"erro": f"Erro interno ao tentar login: {str(e)}"}), 500
+
 
 # Mostra as infos do cliente:
 @app.route("/mostraInfoCliente", methods=["GET"])
@@ -165,6 +258,7 @@ def mostraInfoCliente():
 
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar informações do cliente: {str(e)}"}), 500
+
 
 @app.route("/adicionaSaldo", methods=["POST"])
 def adicionaSaldo():
@@ -238,6 +332,7 @@ def realizaPagamento():
     valor_reais = data['valor_reais']
     referenciaPix = data['referenciaPix']
     comerciante_raw = data['comerciante']
+    descricao = data.get('descricao', '')  # Descrição opcional
 
     # Buscar endereço do cliente pela referência Pix
     endereco_cliente = sistema_cliente.functions.getEnderecoPorPix(referenciaPix).call()
@@ -289,11 +384,40 @@ def realizaPagamento():
     private_key_cliente = cliente_info['private_key']
     receipt = sign_n_send(new_transaction, private_key_cliente)
 
+    # REGISTRAR A TRANSAÇÃO NO BANCO DE DADOS
+    try:
+        # Buscar o cliente no banco de dados
+        cliente = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
+        if not cliente:
+            return jsonify({"erro": "Cliente não encontrado no banco de dados"}), 400
+
+        # Criar nova transação
+        nova_transacao = Transacao(
+            valor_pagamento=valor_reais,
+            descricao=descricao if descricao else None,
+            beneficiado="Comerciante",  # Por enquanto é constante
+            hash_transacao=receipt["transactionHash"].hex(),
+            cliente_id=cliente.id
+        )
+
+        # Salvar no banco
+        db.session.add(nova_transacao)
+        db.session.commit()
+
+        print(f"Transação registrada no BD: ID {nova_transacao.id}")
+
+    except Exception as e:
+        print(f"Erro ao registrar transação no BD: {str(e)}")
+        # Não interrompe o fluxo, pois a transação blockchain já foi realizada
+        db.session.rollback()
+
     return jsonify({
         "valor_reais": valor_reais,
         "valor_eth": round(valor_eth, 8),
         "valor_wei": int(valor_wei),
-        "transaction_hash": receipt["transactionHash"].hex()
+        "transaction_hash": receipt["transactionHash"].hex(),
+        "descricao": descricao,
+        "beneficiado": "Comerciante"
     })
 
 # Verificar saldo do comerciante:
@@ -312,10 +436,56 @@ def getMerchantSaldo():
     # Formatar para string com 2 casas decimais, sem arredondar demais
     return jsonify({
         "saldo_wei": saldo_wei,
-        "saldo_eth": format(saldo_eth, '.6f'),      # 6 casas decimais
-        "saldo_reais": format(saldo_brl, '.2f')    # 2 casas decimais
+        "saldo_eth": format(saldo_eth, '.6f'),  # 6 casas decimais
+        "saldo_reais": format(saldo_brl, '.2f')  # 2 casas decimais
     })
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-# sql odeio esse negocio podre
+# Nova rota para listar transações de um cliente
+@app.route("/transacoesCliente", methods=["GET"])
+def listarTransacoesCliente():
+    referencia_pix = request.args.get("referenciaPix")
+
+    if not referencia_pix:
+        return jsonify({"erro": "Parâmetro 'referenciaPix' é obrigatório!"}), 400
+
+    try:
+        # Buscar cliente
+        cliente = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
+        if not cliente:
+            return jsonify({"erro": "Cliente não encontrado"}), 404
+
+        # Buscar transações do cliente
+        transacoes = Transacao.query.filter_by(cliente_id=cliente.id).order_by(Transacao.data_transacao.desc()).all()
+
+        transacoes_list = []
+        for transacao in transacoes:
+            transacoes_list.append({
+                "id": transacao.id,
+                "valor_pagamento": str(transacao.valor_pagamento),
+                "descricao": transacao.descricao,
+                "beneficiado": transacao.beneficiado,
+                "data_transacao": transacao.data_transacao.isoformat(),
+                "hash_transacao": transacao.hash_transacao
+            })
+
+        return jsonify({
+            "cliente": cliente.nome,
+            "total_transacoes": len(transacoes_list),
+            "transacoes": transacoes_list
+        })
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao buscar transações: {str(e)}"}), 500
+@app.route("/qrcode-registro")
+def criar_qrcode_registro():
+    url = "https://cryp2real.flutterflow.app/register"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    caminho_relativo = qr_degrade(url)  # retorna caminho relativo 'static/qrcodes/qrcode_degrade.png'
+    caminho_absoluto = os.path.join(base_dir, caminho_relativo)
+    print(f"Enviando arquivo: {caminho_absoluto}")
+    return send_file(caminho_absoluto, mimetype='image/png')
+
+if __name__ == '_main_':
+    with app.app_context():
+        db.create_all()
+    app.run(host='0.0.0.0',port=5000)
