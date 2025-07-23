@@ -1,9 +1,9 @@
 # Funções auxiliares
-
 from Backend.FlaskProject.Backend.my_blockchain import w3
 import requests
 import qrcode
 import os
+from PIL import Image
 
 # Função de lista de todas as contas:
 def listAllAccounts():
@@ -24,16 +24,13 @@ def sign_n_send(tx, private_key):
         print("Erro ao aguardar confirmação da transação:", e)
         return None
 
-
 # Função de integração do contrato Solidity com Python
 def extract_interface(compiled_contracts, contract_name):
     # Cria o identificador do contrato no formato padrão do compilador Solidity
     # "<stdin>:NomeDoContrato" indica que o código foi compilado a partir da entrada padrão (concatenação dos arquivos .sol)
     contract_id = f"<stdin>:{contract_name}"
-
     # Acessa os dados do contrato específico usando o identificador
     interface = compiled_contracts[contract_id]
-
     # Retorna a ABI (interface) e o bytecode (código compilado)
     # ABI: necessária para interagir com o contrato após deploy
     # BIN: necessário para fazer o deploy do contrato na blockchain
@@ -46,7 +43,6 @@ def get_eth_to_brl():
     response = requests.get(url, params=params)
     data = response.json()
     return data["ethereum"]["brl"]
-
 
 def gerar_qrcode(link: str, nome_arquivo: str = "qrcode.png") -> str:
     """
@@ -61,18 +57,12 @@ def gerar_qrcode(link: str, nome_arquivo: str = "qrcode.png") -> str:
     )
     qr.add_data(link)
     qr.make(fit=True)
-
     img = qr.make_image(fill_color="black", back_color="cyan").convert("RGB")
-
     caminho = os.path.join("static", "qrcodes", nome_arquivo)
     os.makedirs(os.path.dirname(caminho), exist_ok=True)
     img.save(caminho)
     print(f"QR code salvo em: {caminho}")
     return caminho
-
-import os
-import qrcode
-from PIL import Image
 
 def salvar_qr(img, nome_arquivo):
     pasta = os.path.join("static", "qrcodes")
@@ -84,7 +74,6 @@ def salvar_qr(img, nome_arquivo):
 
 def qr_degrade(data):
     qr = qrcode.make(data).convert("RGBA")
-
     width, height = qr.size
     gradient = Image.new("RGBA", qr.size)
     for x in range(width):
@@ -92,18 +81,14 @@ def qr_degrade(data):
             r = int(255 * (x / width))
             b = 255 - r
             gradient.putpixel((x, y), (r, 0, b, 255))
-
     pixels_qr = qr.load()
     pixels_grad = gradient.load()
-
     for x in range(width):
         for y in range(height):
             if pixels_qr[x, y][0] > 128:
                 pixels_grad[x, y] = (255, 255, 255, 0)
-
     caminho = salvar_qr(gradient, "qrcode_degrade.png")
     return caminho
-
 
 def qr_padrao(data, nome_arquivo):
     qr = qrcode.QRCode(
@@ -119,12 +104,7 @@ def qr_padrao(data, nome_arquivo):
     caminho = salvar_qr(img, nome_arquivo)
     return caminho
 
-def qr_padrao_pagamento_por_carteira(carteira_pix):
-    url = f"https://cryp2real.flutterflow.app/pagamento?carteira={carteira_pix}"
-    return qr_padrao(url, f"qrcode_pagamento_{carteira_pix[-6:]}.png")
-
 if __name__ == "__main__":
     url = "https://cryp2real.flutterflow.app/register"
-
     print(f"Rodando no diretório: {os.getcwd()}")
     qr_degrade(url)

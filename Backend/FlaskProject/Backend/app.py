@@ -7,8 +7,7 @@ from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 
 from Backend.FlaskProject.Backend.deploy_contract import receipt
-from Backend.FlaskProject.Backend.deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, \
-    new_ether_abi
+from Backend.FlaskProject.Backend.deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, new_ether_abi
 from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
 from Backend.FlaskProject.Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
 from flask import send_file
@@ -60,8 +59,10 @@ class Transacao(db.Model):
     # Chave estrangeira para o cliente
     cliente_id = db.Column(db.Integer, db.ForeignKey('cliente.id'), nullable=False)
 
-    def _repr_(self):
+    def __repr__(self):
         return f'<Transacao {self.id}: R${self.valor_pagamento} para {self.beneficiado}>'
+
+
 @app.route('/')
 def run():  # put application's code here
     return 'API funcionando com sucesso!'
@@ -71,12 +72,7 @@ def run():  # put application's code here
 
 @app.route("/registrarCliente", methods=["POST"])
 def registro_cliente():
-    # print("\n=== DADOS RECEBIDOS ===")
-    # print("Headers:", request.headers)
-    # print("Corpo (raw):", request.data)  # Verifique se os dados chegam
-
     data = request.get_json()
-    print("JSON parseado:", data)  # Confira se o JSON foi interpretado
 
     if not data:
         return jsonify({"erro": "Dados JSON não fornecidos"}), 400
@@ -91,11 +87,10 @@ def registro_cliente():
     print("Email:", email)
     print("Senha:", senha)
 
-    # Validações básicas
-    if not nome or len(nome.strip()) < 2:
+    if not nome or len(nome) < 2:
         return jsonify({"erro": "Nome deve ter pelo menos 2 caracteres"}), 400
 
-    if not referenciaPix or len(referenciaPix.strip()) < 1:
+    if not referenciaPix:
         return jsonify({"erro": "Referência PIX não pode estar vazia"}), 400
 
     if not email:
@@ -143,7 +138,23 @@ def registro_cliente():
         }
     )
 
-    transaction_hash = sign_n_send(transaction, private_key_user)
+    receipt = sign_n_send(transaction, private_key_user)
+
+    # Adiciona saldo de R$10
+    cotacao = get_eth_to_brl()
+    valor_eth = 10.0 / cotacao
+    valor_wei = w3.to_wei(valor_eth, 'ether')
+
+    bonus_nonce = w3.eth.get_transaction_count(admWallet)
+    bonus_tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
+        "from": admWallet,
+        "nonce": bonus_nonce,
+        "gas": 300000,
+        "gasPrice": w3.eth.gas_price,
+        "chainId": w3.eth.chain_id
+    })
+
+    bonus_receipt = sign_n_send(bonus_tx, private_key)
 
     novoCliente = Cliente(nome=nome,
                           referenciaPix=referenciaPix,
@@ -156,9 +167,10 @@ def registro_cliente():
     db.session.commit()
 
     return jsonify({
-        "status": "Usuário registrado com sucesso!",
+        "status": "Usuário registrado com sucesso e saldo de R$10,00 adicionado!",
         "carteira": carteiraUsuario,
-        "transacao": receipt["transactionHash"].hex()
+        "tx_registro": receipt["transactionHash"].hex(),
+        "tx_bonus": bonus_receipt["transactionHash"].hex()
     })
 
 
@@ -183,7 +195,7 @@ def loginCliente():
 
         carteira_checksum = w3.to_checksum_address(carteira)
 
-        # Verifica se o cliente está registrado localmente (ou seja, foi registrado no dicionário contas_usuarios)
+        # Verifica se o cliente está registrado localmente (ou seja, foi registrado no dicionário `contas_usuarios`)
         cliente_info = None
         for referenciaPix, info in contas_usuarios.items():
             if info['email'] == email and w3.to_checksum_address(info['address']) == carteira_checksum:
@@ -191,8 +203,7 @@ def loginCliente():
                 break
 
         if not cliente_info:
-            return jsonify(
-                {"erro": "Endereço da carteira não corresponde ou cliente não está registrado localmente"}), 401
+            return jsonify({"erro": "Endereço da carteira não corresponde ou cliente não está registrado localmente"}), 401
 
         return jsonify({
             "status": "Login bem-sucedido!",
@@ -262,60 +273,56 @@ def mostraInfoCliente():
 
 @app.route("/adicionaSaldo", methods=["POST"])
 def adicionaSaldo():
-    data = request.get_json()
-    if not data:
-        return jsonify({"erro": "Dados JSON não fornecidos"}), 400
-
-    endereco_cliente = data.get("carteira")
-    valor_reais = data.get("valor_reais")
-
-    # Validação básica
-    if not endereco_cliente:
-        return jsonify({"erro": "Endereço da carteira é obrigatório!"}), 400
-    if not w3.is_address(endereco_cliente):
-        return jsonify({"erro": "Endereço inválido!"}), 400
-
     try:
-        valor_reais = float(valor_reais)
-        if valor_reais <= 0:
-            return jsonify({"erro": "Valor deve ser maior que zero"}), 400
-    except (ValueError, TypeError):
-        return jsonify({"erro": "Valor inválido. Deve ser um número positivo."}), 400
+        data = request.get_json()
+        if not data:
+            return jsonify({"erro": "Dados JSON não fornecidos"}), 400
 
-    # Obter cotação atual do ETH em BRL usando função utilitária
-    try:
-        cotacao = get_eth_to_brl()
+        referenciaPix = data.get("referenciaPix")
+        valor_reais = data.get("valor_reais")
+
+        if not referenciaPix:
+            return jsonify({"erro": "Referencia Pix não fornecida"}), 400
+
+        try:
+            valor_reais = float(valor_reais)
+            if valor_reais <= 0:
+                return jsonify({"erro": "Valor deve ser maior que zero"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"erro": "Valor inválido. Deve ser um número positivo."}), 400
+
+        try:
+            cotacao = get_eth_to_brl()
+        except Exception as e:
+            return jsonify({"erro": f"Erro ao buscar cotação: {str(e)}"}), 500
+
+        valor_eth = valor_reais / cotacao
+        valor_wei = w3.to_wei(valor_eth, 'ether')
+
+        nonce = w3.eth.get_transaction_count(admWallet)
+        tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
+            "from": admWallet,
+            "nonce": nonce,
+            "gas": 300000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": w3.eth.chain_id
+        })
+
+        receipt = sign_n_send(tx, private_key)
+
+        return jsonify({
+            "status": "Saldo adicionado com sucesso!",
+            "tx_hash": receipt["transactionHash"].hex(),
+            "valor_reais": valor_reais,
+            "valor_eth": valor_eth,
+            "valor_wei": valor_wei,
+            "cotacao_eth_brl": cotacao
+        })
+
     except Exception as e:
-        return jsonify({"erro": f"Erro ao buscar cotação: {str(e)}"}), 500
-
-    # Converter BRL -> ETH -> WEI
-    valor_eth = valor_reais / cotacao
-    valor_wei = w3.to_wei(valor_eth, 'ether')
-
-    endereco_cliente = w3.to_checksum_address(endereco_cliente)
-    nonce = w3.eth.get_transaction_count(admWallet)
-
-    # Construir a transação
-    tx = sistema_cliente.functions.adicionarSaldo(endereco_cliente, valor_wei).build_transaction({
-        "from": admWallet,
-        "nonce": nonce,
-        "gas": 300000,
-        "gasPrice": w3.eth.gas_price,
-        "chainId": w3.eth.chain_id
-    })
-
-    # Assinar e enviar
-    receipt = sign_n_send(tx, private_key)
-
-    return jsonify({
-        "status": "Saldo adicionado com sucesso!",
-        "tx_hash": receipt["transactionHash"].hex(),
-        "valor_reais": valor_reais,
-        "valor_eth": valor_eth,
-        "valor_wei": valor_wei,
-        "cotacao_eth_brl": cotacao
-    })
-
+        import traceback
+        traceback.print_exc()
+        return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():
@@ -476,6 +483,7 @@ def listarTransacoesCliente():
 
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar transações: {str(e)}"}), 500
+
 @app.route("/qrcode-registro")
 def criar_qrcode_registro():
     url = "https://cryp2real.flutterflow.app/register"
@@ -485,7 +493,7 @@ def criar_qrcode_registro():
     print(f"Enviando arquivo: {caminho_absoluto}")
     return send_file(caminho_absoluto, mimetype='image/png')
 
-if __name__ == '_main_':
+if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(host='0.0.0.0',port=5000)
+    app.run(host='0.0.0.0', port=5000)
