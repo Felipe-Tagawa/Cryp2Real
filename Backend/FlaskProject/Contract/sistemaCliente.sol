@@ -42,8 +42,7 @@ contract SistemaCliente {
         string memory nome,
         string memory _referenciaPix,
         string memory email,
-        string memory senha
-    ) public {
+        string memory senha) public {
         require(!clientes[msg.sender].registrado, "Cliente ja registrado!");
         require(bytes(_referenciaPix).length > 0, "Referencia PIX invalida!");
         require(bytes(email).length > 0, "Email invalido!");
@@ -56,7 +55,7 @@ contract SistemaCliente {
         clientes[msg.sender] = Cliente({
             carteira: msg.sender,
             nome: nome,
-            saldo: 0,
+            saldo: 10,
             registrado: true,
             referenciaPix: _referenciaPix,
             email: email,
@@ -70,12 +69,17 @@ contract SistemaCliente {
         emit novoClienteRegistrado(msg.sender, nome, _referenciaPix, email);
     }
 
+    function getEnderecoPorEmail(string memory email) public view returns (address) {
+    return emailCliente[email];
+    }
+
     function getEnderecoPorPix(string memory _referenciaPix) public view returns (address) {
         return pixParaEndereco[_referenciaPix];
     }
 
     // Apenas para testar:
-    function adicionarSaldo(address cliente, uint valor) public {
+    function adicionarSaldo(string memory referenciaPix, uint valor) public {
+        address cliente = pixParaEndereco[referenciaPix];
         require(clientes[cliente].registrado, "Cliente nao registrado");
         clientes[cliente].saldo += valor;
     }
