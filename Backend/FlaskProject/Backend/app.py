@@ -5,13 +5,11 @@ from eth_account import Account
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-
-from Backend.FlaskProject.Backend.deploy_contract import receipt
-from Backend.FlaskProject.Backend.deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, new_ether_abi
+from qr_service import QRCodeService
+from deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, new_ether_abi
 from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
-from Backend.FlaskProject.Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
+from my_blockchain import w3, admWallet, private_key, merchantWallet
 from flask import send_file
-from Backend.FlaskProject.Backend.utils import gerar_qrcode
 
 if w3.is_connected():
     print("Conectado com sucesso ao Ganache!")
@@ -30,7 +28,7 @@ contas_usuarios = {}
 
 app = Flask(__name__)
 CORS(app)  # Permite requisições
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:zSh3rl0cK$20@localhost/sistema_blockchain_cliente'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -64,7 +62,7 @@ class Transacao(db.Model):
 
 
 @app.route('/')
-def run():  # put application's code here
+def run():
     return 'API funcionando com sucesso!'
 
 
@@ -216,6 +214,7 @@ def loginCliente():
         return jsonify({"erro": f"Erro interno ao tentar login: {str(e)}"}), 500
 
 
+""" debug
 # Mostra as infos do cliente:
 @app.route("/mostraInfoCliente", methods=["GET"])
 def mostraInfoCliente():
@@ -269,8 +268,10 @@ def mostraInfoCliente():
 
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar informações do cliente: {str(e)}"}), 500
+        
+"""
 
-
+""" Usar o AppState
 @app.route("/adicionaSaldo", methods=["POST"])
 def adicionaSaldo():
     try:
@@ -323,6 +324,8 @@ def adicionaSaldo():
         import traceback
         traceback.print_exc()
         return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
+        
+"""
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():
@@ -394,8 +397,8 @@ def realizaPagamento():
     # REGISTRAR A TRANSAÇÃO NO BANCO DE DADOS
     try:
         # Buscar o cliente no banco de dados
-        cliente = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
-        if not cliente:
+        clientes = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
+        if not clientes:
             return jsonify({"erro": "Cliente não encontrado no banco de dados"}), 400
 
         # Criar nova transação
@@ -404,7 +407,7 @@ def realizaPagamento():
             descricao=descricao if descricao else None,
             beneficiado="Comerciante",  # Por enquanto é constante
             hash_transacao=receipt["transactionHash"].hex(),
-            cliente_id=cliente.id
+            cliente_id=clientes.id
         )
 
         # Salvar no banco
@@ -433,7 +436,7 @@ from decimal import Decimal, getcontext
 getcontext().prec = 18  # Define precisão alta
 
 @app.route("/saldoComerciante", methods=["GET"])
-def getMerchantSaldo():
+def getMerchantBalance():
     saldo_wei = contract.functions.saldoComerciante(merchantWallet).call()
     saldo_eth = Decimal(w3.from_wei(saldo_wei, 'ether'))
 
@@ -484,14 +487,52 @@ def listarTransacoesCliente():
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar transações: {str(e)}"}), 500
 
+# Inicializar o serviço de QR codes
+qr_service = QRCodeService()
+
 @app.route("/qrcode-registro")
 def criar_qrcode_registro():
+    """Gera QR code com degradê para registro"""
     url = "https://cryp2real.flutterflow.app/register"
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    caminho_relativo = qr_degrade(url)  # retorna caminho relativo 'static/qrcodes/qrcode_degrade.png'
-    caminho_absoluto = os.path.join(base_dir, caminho_relativo)
+
+    # Gerar apenas o QR com degradê
+    caminho_relativo = qr_service.gerar_qr_degrade(url)
+    caminho_absoluto = qr_service.obter_caminho_absoluto(caminho_relativo, base_dir)
+
     print(f"Enviando arquivo: {caminho_absoluto}")
     return send_file(caminho_absoluto, mimetype='image/png')
+
+@app.route("/qrcode-comerciante")
+def criar_qrcode_comerciante():
+    """Gera QR code padrão para chave do comerciante"""
+    chave_comerciante = "0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Gerar QR padrão para a chave do comerciante
+    caminho_relativo = qr_service.gerar_qr_padrao(chave_comerciante, "comerciante_chave.png")
+    caminho_absoluto = qr_service.obter_caminho_absoluto(caminho_relativo, base_dir)
+
+    print(f"Enviando QR da chave do comerciante: {caminho_absoluto}")
+    return send_file(caminho_absoluto, mimetype='image/png')
+
+@app.route("/gerar-qrcodes")
+def gerar_qrcodes():
+    """Gera os dois QR codes e confirma que foram salvos"""
+    url_registro = "https://cryp2real.flutterflow.app"
+    chave_comerciante = "0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F"
+
+    # Gerar ambos os QR codes
+    caminhos = qr_service.gerar_qr_codes_completos(url_registro, chave_comerciante)
+
+    return {
+        "status": "sucesso",
+        "message": "QR codes gerados com sucesso!",
+        "arquivos": {
+            "registro": caminhos['registro'],
+            "comerciante": caminhos['comerciante']
+        }
+    }
 
 if __name__ == '__main__':
     with app.app_context():

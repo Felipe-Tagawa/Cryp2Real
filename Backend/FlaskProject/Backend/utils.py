@@ -87,7 +87,7 @@ def qr_degrade(data):
         for y in range(height):
             if pixels_qr[x, y][0] > 128:
                 pixels_grad[x, y] = (255, 255, 255, 0)
-    caminho = salvar_qr(gradient, "qrcode_degrade.png")
+    caminho = salvar_qr(gradient, "registro_degrade.png")
     return caminho
 
 def qr_padrao(data, nome_arquivo):
@@ -104,7 +104,9 @@ def qr_padrao(data, nome_arquivo):
     caminho = salvar_qr(img, nome_arquivo)
     return caminho
 
+"""
 if __name__ == "__main__":
     url = "https://cryp2real.flutterflow.app/register"
     print(f"Rodando no diretório: {os.getcwd()}")
     qr_degrade(url)
+"""

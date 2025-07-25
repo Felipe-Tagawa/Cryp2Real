@@ -5,7 +5,7 @@ CREATE DATABASE IF NOT EXISTS sistema_blockchain_cliente;
 USE sistema_blockchain_cliente;
 
 -- Tabela de Clientes
-CREATE TABLE clientes (
+CREATE TABLE cliente (
     id INT PRIMARY KEY AUTO_INCREMENT,
     nome VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS transacao (
     -- Chave estrangeira
     CONSTRAINT fk_transacao_cliente
         FOREIGN KEY (cliente_id)
-        REFERENCES clientes(id)
+        REFERENCES cliente(id)
         ON DELETE CASCADE
         ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Tabela de transações PIX dos clientes';
