@@ -220,6 +220,7 @@ contract NewEther {
 
         string memory nomeDoador;
         string memory emailDoador;
+        string memory contaONG = "0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F";
 
         if (clientes.ClienteRegistrado(msg.sender)) {
             nomeDoador = clientes.getNomeCliente(msg.sender);

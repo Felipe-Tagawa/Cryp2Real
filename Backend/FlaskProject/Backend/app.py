@@ -27,7 +27,13 @@ print(merchantWallet)
 contas_usuarios = {}
 
 app = Flask(__name__)
-CORS(app)  # Permite requisições
+CORS(app, resources={r"/*": {"origins": [
+    "https://cryp2real.flutterflow.app",
+    "https://app.flutterflow.io",
+    "https://run.app.flutterflow.io"
+]}})
+
+# CORS(app)  # Permite requisições
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -40,7 +46,7 @@ class Cliente(db.Model):
     senha = db.Column(db.String(100), nullable=False)
     referenciaPix = db.Column(db.String(100), unique=True, nullable=False)
     carteira = db.Column(db.String(42), nullable=False)
-    private_key = db.Column(db.Text, nullable=False)  # ou encriptada
+    # private_key = db.Column(db.Text, nullable=False)
 
     # Relacionamento com transações
     transacoes = db.relationship('Transacao', backref='cliente', lazy=True)
@@ -158,8 +164,8 @@ def registro_cliente():
                           referenciaPix=referenciaPix,
                           email=email,
                           senha=senha,
-                          carteira=carteiraUsuario,
-                          private_key=private_key_user)
+                          carteira=carteiraUsuario)
+                          # private_key=private_key_user)
 
     db.session.add(novoCliente)
     db.session.commit()
@@ -486,6 +492,49 @@ def listarTransacoesCliente():
 
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar transações: {str(e)}"}), 500
+
+# Doação para ONG:
+@app.route("/donate", methods=["POST"])
+def donate():
+    # Debug: verificar se está recebendo dados
+    data = request.get_json()
+    print(f"Dados recebidos: {data}")
+    print(f"Tipo dos dados: {type(data)}")
+
+    # Verificar se data não é None
+    if not data:
+        return jsonify({"erro": "Nenhum dado JSON recebido"}), 400
+
+    # Verificar se valorReais existe nos dados
+    if 'valorReais' not in data:
+        return jsonify({"erro": "Parâmetro 'valorReais' não encontrado"}), 400
+
+    # Tentar converter para float com tratamento de erro
+    try:
+        valor_reais = float(data.get('valorReais', 0))
+    except (TypeError, ValueError) as e:
+        return jsonify({"erro": f"Valor inválido para valorReais: {data.get('valorReais')}"}), 400
+
+    if valor_reais <= 0:
+        return jsonify({"erro": "Valor deve ser maior que zero"}), 400
+
+    # Resto do código...
+    cotacao = get_eth_to_brl()
+    valor_eth = valor_reais / cotacao
+    valor_wei = w3.to_wei(valor_eth, 'ether')
+
+    return jsonify({
+        "valor_wei": int(valor_wei),
+        "valor_eth": str(valor_eth),
+        "valor_brl": round(valor_reais, 2),
+        "cotacao": cotacao
+    })
+
+"""
+                                Implantação dos QRCodes:
+                                Registro: Site
+                                Comerciante: Transação Pix
+"""
 
 # Inicializar o serviço de QR codes
 qr_service = QRCodeService()
