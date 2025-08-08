@@ -8,10 +8,10 @@ from flask import send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 
-from deploy_output import sistema_cliente_address, etherFlow_address, sistema_cliente_abi, etherFlow_abi
+from Backend.deploy_output import sistema_cliente_address, etherFlow_address, sistema_cliente_abi, etherFlow_abi
 from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
-from my_blockchain import w3, admWallet, private_key, merchantWallet
-from qr_service import QRCodeService
+from Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
+from Backend.qr_service import QRCodeService
 
 if w3.is_connected():
     print("Conectado com sucesso ao Ganache!")
