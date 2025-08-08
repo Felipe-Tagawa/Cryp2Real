@@ -67,6 +67,74 @@ class Transacao(db.Model):
     def __repr__(self):
         return f'<Transacao {self.id}: R${self.valor_pagamento} para {self.beneficiado}>'
 
+def converter_reais_para_wei(valor_reais):
+    """
+    Converte valor em reais para wei automaticamente baseado na cotação atual
+
+    Args:
+        valor_reais (float): Valor em reais a ser convertido
+
+    Returns:
+        dict: Dicionário com valor_wei, valor_eth, cotacao_usada
+
+    Raises:
+        Exception: Se houver erro na conversão ou busca de cotação
+    """
+    try:
+        # Buscar cotação atual
+        cotacao_eth_brl = get_eth_to_brl()
+
+        # Converter reais para ETH
+        valor_eth = valor_reais / cotacao_eth_brl
+
+        # Converter ETH para Wei
+        valor_wei = w3.to_wei(valor_eth, 'ether')
+
+        return {
+            'valor_wei': int(valor_wei),
+            'valor_eth': valor_eth,
+            'cotacao_usada': cotacao_eth_brl,
+            'valor_reais_original': valor_reais
+        }
+
+    except Exception as e:
+        raise Exception(f"Erro na conversão automática: {str(e)}")
+
+
+def converter_wei_para_reais(valor_wei):
+    """
+    Converte valor em wei para reais automaticamente baseado na cotação atual
+
+    Args:
+        valor_wei (int): Valor em wei a ser convertido
+
+    Returns:
+        dict: Dicionário com valor_reais, valor_eth, cotacao_usada
+
+    Raises:
+        Exception: Se houver erro na conversão ou busca de cotação
+    """
+    try:
+        # Converter Wei para ETH
+        valor_eth = w3.from_wei(valor_wei, 'ether')
+
+        # Buscar cotação atual
+        cotacao_eth_brl = get_eth_to_brl()
+
+        # Converter ETH para reais
+        valor_reais = float(valor_eth) * cotacao_eth_brl
+
+        return {
+            'valor_reais': valor_reais,
+            'valor_eth': float(valor_eth),
+            'cotacao_usada': cotacao_eth_brl,
+            'valor_wei_original': valor_wei
+        }
+
+    except Exception as e:
+        raise Exception(f"Erro na conversão automática: {str(e)}")
+
+
 
 @app.route('/')
 def run():
@@ -74,7 +142,6 @@ def run():
 
 
 # Registrar um novo cliente:
-
 @app.route("/registrarCliente", methods=["POST"])
 def registro_cliente():
     data = request.get_json()
@@ -440,6 +507,142 @@ def realizaPagamento():
 # Verificar saldo do comerciante:
 
 getcontext().prec = 18  # Define precisão alta
+
+@app.route("/transferirParaCliente", methods=["POST"])
+def transferirParaCliente():
+    """Realiza transferência entre clientes usando referência PIX"""
+    data = request.get_json()
+    if not data:
+        return jsonify({"erro": "Dados JSON não fornecidos"}), 400
+
+    # Validar campos obrigatórios
+    required_fields = ['valor_reais', 'referenciaPix_origem', 'referenciaPix_destino']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"erro": f"Campo '{field}' é obrigatório"}), 400
+
+    valor_reais = data['valor_reais']
+    referencia_origem = data['referenciaPix_origem']
+    referencia_destino = data['referenciaPix_destino']
+    descricao = data.get('descricao', 'Transferência entre clientes')
+
+    # Verificar se não é auto-transferência
+    if referencia_origem == referencia_destino:
+        return jsonify({"erro": "Não é possível transferir para si mesmo"}), 400
+
+    # Validar valor
+    try:
+        valor_reais = float(valor_reais)
+        if valor_reais <= 0:
+            return jsonify({"erro": "Valor deve ser maior que zero"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"erro": "Valor inválido. Deve ser um número positivo"}), 400
+
+    # Buscar endereços dos clientes
+    try:
+        endereco_origem = sistema_cliente.functions.getEnderecoPorPix(referencia_origem).call()
+        endereco_destino = sistema_cliente.functions.getEnderecoPorPix(referencia_destino).call()
+
+        if endereco_origem == "0x0000000000000000000000000000000000000000":
+            return jsonify({"erro": "Cliente remetente não encontrado"}), 400
+
+        if endereco_destino == "0x0000000000000000000000000000000000000000":
+            return jsonify({"erro": "Cliente destinatário não encontrado"}), 400
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao buscar clientes: {str(e)}"}), 500
+
+    # Obter cotação e converter valor
+    try:
+        cotacao_eth_brl = get_eth_to_brl()
+        valor_eth = valor_reais / cotacao_eth_brl
+        valor_wei = w3.to_wei(valor_eth, 'ether')
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao buscar cotação: {str(e)}"}), 500
+
+    # Verificar saldo do remetente
+    try:
+        saldo_origem = sistema_cliente.functions.consultarSaldo(referencia_origem).call()
+        if saldo_origem < valor_wei:
+            saldo_reais = (w3.from_wei(saldo_origem, 'ether') * cotacao_eth_brl)
+            return jsonify({
+                "erro": "Saldo insuficiente",
+                "saldo_atual_reais": round(saldo_reais, 2)
+            }), 400
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao verificar saldo: {str(e)}"}), 500
+
+    # Buscar chave privada do remetente
+    cliente_origem_info = contas_usuarios.get(referencia_origem)
+    if not cliente_origem_info:
+        return jsonify({"erro": "Dados do cliente remetente não encontrados no servidor"}), 400
+
+    private_key_origem = cliente_origem_info['private_key']
+
+    try:
+        # Executar transferência no blockchain
+        nonce = w3.eth.get_transaction_count(endereco_origem)
+
+        # Usar função de transferência do contrato sistema_cliente
+        transaction = sistema_cliente.functions.transferirSaldo(
+            referencia_origem,
+            referencia_destino,
+            valor_wei
+        ).build_transaction({
+            "from": endereco_origem,
+            "nonce": nonce,
+            "gas": 300000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": w3.eth.chain_id
+        })
+
+        receipt = sign_n_send(transaction, private_key_origem)
+
+        # Registrar transação no banco de dados para o remetente
+        try:
+            cliente_origem = Cliente.query.filter_by(referenciaPix=referencia_origem).first()
+            cliente_destino = Cliente.query.filter_by(referenciaPix=referencia_destino).first()
+
+            if cliente_origem and cliente_destino:
+                # Transação de saída para o remetente
+                transacao_saida = Transacao(
+                    valor_pagamento=-valor_reais,  # Negativo para indicar saída
+                    descricao=f"Transferência para {cliente_destino.nome}: {descricao}",
+                    beneficiado=cliente_destino.nome,
+                    hash_transacao=receipt["transactionHash"].hex(),
+                    cliente_id=cliente_origem.id
+                )
+
+                # Transação de entrada para o destinatário
+                transacao_entrada = Transacao(
+                    valor_pagamento=valor_reais,  # Positivo para indicar entrada
+                    descricao=f"Recebimento de {cliente_origem.nome}: {descricao}",
+                    beneficiado=cliente_origem.nome,
+                    hash_transacao=receipt["transactionHash"].hex(),
+                    cliente_id=cliente_destino.id
+                )
+
+                db.session.add(transacao_saida)
+                db.session.add(transacao_entrada)
+                db.session.commit()
+
+        except Exception as e:
+            print(f"Erro ao registrar transação no BD: {str(e)}")
+            db.session.rollback()
+
+        return jsonify({
+            "status": "Transferência realizada com sucesso!",
+            "valor_reais": valor_reais,
+            "valor_eth": round(valor_eth, 8),
+            "referencia_origem": referencia_origem,
+            "referencia_destino": referencia_destino,
+            "transaction_hash": receipt["transactionHash"].hex(),
+            "cotacao_eth_brl": round(cotacao_eth_brl, 2),
+            "descricao": descricao
+        })
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao executar transferência: {str(e)}"}), 500
 
 @app.route("/saldoComerciante", methods=["GET"])
 def getMerchantBalance():

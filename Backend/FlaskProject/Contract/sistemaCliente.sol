@@ -202,4 +202,44 @@ contract SistemaCliente {
         require(msg.value > 0, "Valor precisa ser maior que zero");
         clientes[msg.sender].saldo += msg.value;
     }
+        // Função para transferir saldo entre clientes
+    function transferirSaldo(
+        string memory _referenciaPix_origem,
+        string memory _referenciaPix_destino,
+        uint256 _valor
+    ) public {
+        address endereco_origem = pixParaEndereco[_referenciaPix_origem];
+        address endereco_destino = pixParaEndereco[_referenciaPix_destino];
+
+        require(endereco_origem != address(0), "Cliente origem nao encontrado");
+        require(endereco_destino != address(0), "Cliente destino nao encontrado");
+        require(msg.sender == endereco_origem, "Apenas o proprietario pode transferir");
+        require(saldos[endereco_origem] >= _valor, "Saldo insuficiente");
+
+        // Realizar transferência
+        saldos[endereco_origem] -= _valor;
+        saldos[endereco_destino] += _valor;
+
+        emit TransferenciaSaldo(endereco_origem, endereco_destino, _valor);
+    }
+
+    // Função para consultar saldo por referência PIX
+    function consultarSaldo(string memory _referenciaPix) public view returns (uint256) {
+        address endereco = pixParaEndereco[_referenciaPix];
+        require(endereco != address(0), "Cliente nao encontrado");
+        return saldos[endereco];
+    }
+
+    // Função para obter endereço por PIX
+    function getEnderecoPorPix(string memory _referenciaPix) public view returns (address) {
+        return pixParaEndereco[_referenciaPix];
+    }
+
+    // Event para transferências
+    event TransferenciaSaldo(
+        address indexed origem,
+        address indexed destino,
+        uint256 valor
+    );
+
 }
