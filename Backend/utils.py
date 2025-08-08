@@ -1,5 +1,5 @@
 # Funções auxiliares
-from my_blockchain import w3
+from Backend.my_blockchain import w3
 import requests
 import qrcode
 import os

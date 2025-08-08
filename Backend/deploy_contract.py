@@ -3,7 +3,7 @@ import os
 from web3 import Web3
 from solcx import compile_source, install_solc
 from dotenv import load_dotenv
-from my_blockchain import PRIVATE_KEY, GANACHE_URL, admWallet
+from Backend.my_blockchain import PRIVATE_KEY, GANACHE_URL, admWallet
 from Backend.utils import extract_interface, sign_n_send
 
 # Carregar variáveis de ambiente
