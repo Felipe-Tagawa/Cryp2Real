@@ -32,12 +32,12 @@ compiled_contracts = compile_source(
     solc_version="0.8.19",
     optimize=True,
     optimize_runs=200,
-    via_ir=True  # Habilita o pipeline IR para resolver "Stack too deep"
+    via_ir=True
 )
 
-# Extrair interfaces (ABI + bytecode) usando sua função extract_interface
+# Extrair interfaces (ABI + bytecode) usando a função extract_interface
 sistema_cliente_abi, sistema_cliente_bytecode = extract_interface(compiled_contracts, "SistemaCliente")
-new_ether_abi, new_ether_bytecode = extract_interface(compiled_contracts, "NewEther")
+etherFlow_abi, etherFlow_bytecode = extract_interface(compiled_contracts, "etherFlow")
 
 # 1. Deploy SistemaCliente
 sistema_cliente_contract = w3.eth.contract(abi=sistema_cliente_abi, bytecode=sistema_cliente_bytecode)
@@ -54,8 +54,8 @@ receipt = sign_n_send(tx, PRIVATE_KEY)
 sistema_cliente_address = receipt["contractAddress"]
 print(f"[✔] SistemaCliente deployado em: {sistema_cliente_address}")
 
-# 2. Deploy NewEther
-new_ether_contract = w3.eth.contract(abi=new_ether_abi, bytecode=new_ether_bytecode)
+# 2. Deploy EtherFlow
+new_ether_contract = w3.eth.contract(abi=etherFlow_abi, bytecode=etherFlow_bytecode)
 nonce += 1
 
 tx2 = new_ether_contract.constructor(sistema_cliente_address).build_transaction({
@@ -67,17 +67,17 @@ tx2 = new_ether_contract.constructor(sistema_cliente_address).build_transaction(
 })
 
 receipt2 = sign_n_send(tx2, PRIVATE_KEY)
-new_ether_address = receipt2["contractAddress"]
-print(f"[✔] NewEther deployado em: {new_ether_address}")
+etherFlow_address = receipt2["contractAddress"]
+print(f"[✔] EtherFlow deployado em: {etherFlow_address}")
 
 # 3. Gerar arquivo de saída com ABIs e endereços
 with open("deploy_output.py", "w") as f:
     f.write(f'''
 sistema_cliente_address = "{sistema_cliente_address}"
-new_ether_address = "{new_ether_address}"
+etherFlow_address = "{etherFlow_address}"
 
 sistema_cliente_abi = {sistema_cliente_abi}
-new_ether_abi = {new_ether_abi}
+etherFlow_abi = {etherFlow_abi}
 ''')
 
 print("\n[✓] Arquivo 'deploy_output.py' gerado com sucesso!")

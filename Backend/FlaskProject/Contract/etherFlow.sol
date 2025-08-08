@@ -6,11 +6,11 @@ interface ISistemaCliente {
     function ClienteRegistrado(address cliente) external view returns (bool);
     function getNomeCliente(address cliente) external view returns (string memory);
     function getEmailCliente(address cliente) external view returns (string memory);
-    function saldoClienteTestes(address cliente) external view returns (uint256);
+    function saldoCliente(address cliente) external view returns (uint256);
     function atualizarSaldoCliente(address cliente, uint256 novoSaldo) external;
 }
 
-contract NewEther {
+contract etherFlow {
     address public dono;
     address public contaOng;
     uint256 public percentComissao;
@@ -89,7 +89,7 @@ contract NewEther {
     }
 
     function saldoCliente() public view apenasClienteRegistrado returns (uint256) {
-        return clientes.saldoClienteTestes(msg.sender);
+        return clientes.saldoCliente(msg.sender);
     }
 
     function saldoOng() public view returns (uint256) {
@@ -106,7 +106,7 @@ contract NewEther {
         address payable comerciante
     ) public payable noReentrance apenasClienteRegistrado {
 
-        uint256 saldoAtual = clientes.saldoClienteTestes(msg.sender);
+        uint256 saldoAtual = clientes.saldoCliente(msg.sender);
         require(saldoAtual >= valor, "Saldo insuficiente.");
 
         uint256 novoSaldo = saldoAtual - valor;
@@ -214,23 +214,32 @@ contract NewEther {
         return (valorComissao, valorOng);
     }
 
-    function doacaoDireta() public payable noReentrance {
+    function doacaoDireta() public payable noReentrance apenasClienteRegistrado {
         require(msg.value > 0, "Voce deve enviar um valor maior do que zero");
-        uint256 valorDoado = msg.value;
 
-        string memory nomeDoador;
-        string memory emailDoador;
-        string memory contaONG = "0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F";
+        uint256 valorDoado = msg.value;
+        uint256 saldoAtual = clientes.saldoCliente(msg.sender);
+        require(saldoAtual >= valorDoado, "Saldo insuficiente para doacao.");
+
+        // Atualizar saldo do cliente
+        uint256 novoSaldo = saldoAtual - valorDoado;
+        clientes.atualizarSaldoCliente(msg.sender, novoSaldo);
+
+        // Dados do doador
+        string memory nomeDoador = "";
+        string memory emailDoador = "";
 
         if (clientes.ClienteRegistrado(msg.sender)) {
             nomeDoador = clientes.getNomeCliente(msg.sender);
             emailDoador = clientes.getEmailCliente(msg.sender);
         }
 
+        // Transferir para a ONG
         if (contaOng != address(0)) {
             payable(contaOng).transfer(valorDoado);
         }
 
         emit doacaoRealizada(msg.sender, valorDoado, nomeDoador, emailDoador);
     }
+
 }

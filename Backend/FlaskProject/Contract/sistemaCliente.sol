@@ -188,12 +188,8 @@ contract SistemaCliente {
         _;
     }
 
-    function saldoCliente() public view apenasClienteRegistrado returns (uint256) {
+    function saldoCliente(address cliente) public view apenasClienteRegistrado returns (uint256) {
         return clientes[msg.sender].saldo;
-    }
-
-    function saldoClienteTestes(address cliente) public view returns (uint256) {
-        return clientes[cliente].saldo;
     }
 
     // IMPORTANTE: Função para permitir que outros contratos atualizem o saldo

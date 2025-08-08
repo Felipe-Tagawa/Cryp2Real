@@ -5,8 +5,9 @@ from eth_account import Account
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+from decimal import Decimal, getcontext
 from qr_service import QRCodeService
-from deploy_output import sistema_cliente_address, new_ether_address, sistema_cliente_abi, new_ether_abi
+from deploy_output import sistema_cliente_address, etherFlow_address, sistema_cliente_abi, etherFlow_abi
 from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
 from my_blockchain import w3, admWallet, private_key, merchantWallet
 from flask import send_file
@@ -16,14 +17,14 @@ if w3.is_connected():
 else:
     print("Não conectado com Ganache!")
 
-contract = w3.eth.contract(address=new_ether_address, abi=new_ether_abi)
+etherFlow = w3.eth.contract(address=etherFlow_address, abi=etherFlow_abi)
 sistema_cliente = w3.eth.contract(address=sistema_cliente_address, abi=sistema_cliente_abi)
 
 print(merchantWallet)
 
 # listAllAccounts() -- Uso p/ Debug
 
-# Criar um dicionário para inserir as contas:
+# Criar um set para inserir as contas:
 contas_usuarios = {}
 
 app = Flask(__name__)
@@ -384,7 +385,7 @@ def realizaPagamento():
 
     nonce = w3.eth.get_transaction_count(endereco_cliente)
 
-    new_transaction = contract.functions.realizaPagamentoCliente(
+    new_transaction = etherFlow.functions.realizaPagamentoCliente(
         valor_wei, referenciaPix, comerciante
     ).build_transaction({
         "from": endereco_cliente,
@@ -437,13 +438,12 @@ def realizaPagamento():
     })
 
 # Verificar saldo do comerciante:
-from decimal import Decimal, getcontext
 
 getcontext().prec = 18  # Define precisão alta
 
 @app.route("/saldoComerciante", methods=["GET"])
 def getMerchantBalance():
-    saldo_wei = contract.functions.saldoComerciante(merchantWallet).call()
+    saldo_wei = etherFlow.functions.saldoComerciante(merchantWallet).call()
     saldo_eth = Decimal(w3.from_wei(saldo_wei, 'ether'))
 
     cotacao_eth_brl = Decimal('18000.00')
@@ -496,39 +496,86 @@ def listarTransacoesCliente():
 # Doação para ONG:
 @app.route("/donate", methods=["POST"])
 def donate():
-    # Debug: verificar se está recebendo dados
     data = request.get_json()
-    print(f"Dados recebidos: {data}")
-    print(f"Tipo dos dados: {type(data)}")
 
-    # Verificar se data não é None
     if not data:
         return jsonify({"erro": "Nenhum dado JSON recebido"}), 400
 
-    # Verificar se valorReais existe nos dados
-    if 'valorReais' not in data:
-        return jsonify({"erro": "Parâmetro 'valorReais' não encontrado"}), 400
+    valor_reais = data.get("valorReais")
+    referencia_pix = data.get("referenciaPix", "").strip()
 
-    # Tentar converter para float com tratamento de erro
+    if valor_reais is None or referencia_pix == "":
+        return jsonify({"erro": "Campos obrigatórios: valorReais e referenciaPix"}), 400
+
     try:
-        valor_reais = float(data.get('valorReais', 0))
-    except (TypeError, ValueError) as e:
-        return jsonify({"erro": f"Valor inválido para valorReais: {data.get('valorReais')}"}), 400
+        valor_reais = float(valor_reais)
+        if valor_reais <= 0:
+            return jsonify({"erro": "O valor da doação deve ser maior que zero"}), 400
+    except ValueError:
+        return jsonify({"erro": "valorReais deve ser um número"}), 400
 
-    if valor_reais <= 0:
-        return jsonify({"erro": "Valor deve ser maior que zero"}), 400
+    try:
+        # Buscar endereço do cliente pela referência Pix
+        endereco_cliente = sistema_cliente.functions.getEnderecoPorPix(referencia_pix).call()
+        if not w3.is_address(endereco_cliente) or endereco_cliente == w3.to_checksum_address("0x0000000000000000000000000000000000000000"):
+            return jsonify({"erro": "Cliente não registrado com essa referência Pix"}), 400
 
-    # Resto do código...
-    cotacao = get_eth_to_brl()
-    valor_eth = valor_reais / cotacao
-    valor_wei = w3.to_wei(valor_eth, 'ether')
+        cliente_info = contas_usuarios.get(referencia_pix)
+        if not cliente_info:
+            return jsonify({"erro": "Cliente não encontrado no servidor"}), 400
 
-    return jsonify({
-        "valor_wei": int(valor_wei),
-        "valor_eth": str(valor_eth),
-        "valor_brl": round(valor_reais, 2),
-        "cotacao": cotacao
-    })
+        # Conversão BRL → ETH → WEI
+        cotacao = get_eth_to_brl()
+        valor_eth = valor_reais / cotacao
+        valor_wei = w3.to_wei(valor_eth, 'ether')
+
+        # Criar transação (saldo já será verificado no contrato)
+        nonce = w3.eth.get_transaction_count(endereco_cliente)
+        tx = etherFlow.functions.doacaoDireta().build_transaction({
+            "from": endereco_cliente,
+            "value": int(valor_wei),
+            "nonce": nonce,
+            "gas": 300000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": w3.eth.chain_id
+        })
+
+        # Assinar e enviar
+        signed_tx = sign_n_send(tx, cliente_info['private_key'])
+
+        # Registrar no banco
+        try:
+            cliente_db = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
+            if cliente_db:
+                nova_transacao = Transacao(
+                    valor_pagamento=valor_reais,
+                    descricao="Doação para ONG",
+                    beneficiado="ONG - Conta: 0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F",
+                    hash_transacao=signed_tx["transactionHash"].hex(),
+                    cliente_id=cliente_db.id
+                )
+                db.session.add(nova_transacao)
+                db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"Erro ao registrar no BD: {str(e)}")
+
+        return jsonify({
+            "status": "Doação realizada com sucesso!",
+            "valor_wei": int(valor_wei),
+            "valor_eth": str(valor_eth),
+            "valor_brl": round(valor_reais, 2),
+            "cotacao": cotacao,
+            "transaction_hash": signed_tx["transactionHash"].hex(),
+            "gas_usado": signed_tx.get("gasUsed", "N/A"),
+            "endereco_doador": endereco_cliente,
+            "endereco_ong": "0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"erro": f"Erro ao processar a doação: {str(e)}"}), 500
 
 """
                                 Implantação dos QRCodes:
