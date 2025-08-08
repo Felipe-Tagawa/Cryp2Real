@@ -29,11 +29,7 @@ print(merchantWallet)
 contas_usuarios = {}
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": [
-    "https://cryp2real.flutterflow.app",
-    "https://app.flutterflow.io",
-    "https://run.app.flutterflow.io"
-]}})
+CORS(app)
 
 # CORS(app)  # Permite requisições
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
