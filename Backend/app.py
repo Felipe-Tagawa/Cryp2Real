@@ -1,16 +1,17 @@
 import os
 from datetime import datetime
+from decimal import Decimal, getcontext
 
 from eth_account import Account
 from flask import Flask, jsonify, request
+from flask import send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from decimal import Decimal, getcontext
-from qr_service import QRCodeService
+
 from deploy_output import sistema_cliente_address, etherFlow_address, sistema_cliente_abi, etherFlow_abi
-from Backend.FlaskProject.Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
+from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
 from my_blockchain import w3, admWallet, private_key, merchantWallet
-from flask import send_file
+from qr_service import QRCodeService
 
 if w3.is_connected():
     print("Conectado com sucesso ao Ganache!")

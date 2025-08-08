@@ -1,5 +1,5 @@
 # Funções auxiliares
-from Backend.FlaskProject.Backend.my_blockchain import w3
+from my_blockchain import w3
 import requests
 import qrcode
 import os

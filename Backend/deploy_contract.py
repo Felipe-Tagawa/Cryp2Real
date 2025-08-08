@@ -3,8 +3,8 @@ import os
 from web3 import Web3
 from solcx import compile_source, install_solc
 from dotenv import load_dotenv
-from Backend.FlaskProject.Backend.my_blockchain import PRIVATE_KEY, GANACHE_URL, admWallet
-from Backend.FlaskProject.Backend.utils import extract_interface, sign_n_send
+from my_blockchain import PRIVATE_KEY, GANACHE_URL, admWallet
+from Backend.utils import extract_interface, sign_n_send
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -21,7 +21,7 @@ solidity_code = ""
 
 # Lê todos os arquivos .sol da pasta Contract e combina em um único código
 for filename in ["sistemaCliente.sol", "etherFlow.sol"]:
-    path = os.path.join("../Contract", filename)
+    path = os.path.join("Contract", filename)
     with open(path, "r") as f:
         solidity_code += f.read() + "\n"
 
