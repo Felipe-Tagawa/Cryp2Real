@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-#URL do Ganache
 GANACHE_URL = "https://18f00896eddb.ngrok-free.app" # "http://127.0.0.1:7545"
 PRIVATE_KEY = "0x1f9f1feb9dd4a6fa9f7de741de664b2e41e834a7b9be63a04e1ae2ed8ee56a42"
 
