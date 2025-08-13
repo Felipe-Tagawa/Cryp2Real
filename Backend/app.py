@@ -2,9 +2,11 @@ import os
 from datetime import datetime
 from decimal import Decimal, getcontext
 
+from sqlalchemy import text
 from eth_account import Account
 from flask import Flask, jsonify, request
 from flask import send_file
+from flask.cli import load_dotenv
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 
@@ -12,6 +14,8 @@ from Backend.deploy_output import sistema_cliente_address, etherFlow_address, si
 from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
 from Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
 from Backend.qr_service import QRCodeService
+
+load_dotenv()
 
 if w3.is_connected():
     print("Conectado com sucesso ao Ganache!")
@@ -28,11 +32,20 @@ print(merchantWallet)
 # Criar um set para inserir as contas:
 contas_usuarios = {}
 
+class Config:
+    # Para desenvolvimento local
+    if os.environ.get('RAILWAY_ENVIRONMENT'):
+        # Configuração para Railway
+        SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{os.environ.get('DB_USERNAME')}:{os.environ.get('DB_PASSWORD')}@{os.environ.get('DB_HOST')}:{os.environ.get('DB_PORT')}/{os.environ.get('DB_NAME')}"
+    else:
+        # Configuração local
+        SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
+
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
 app = Flask(__name__)
 CORS(app)
-
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config.from_object(Config)
 db = SQLAlchemy(app)
 
 
@@ -136,6 +149,14 @@ def converter_wei_para_reais(valor_wei):
 def run():
     return 'API funcionando com sucesso!'
 
+@app.route('/test-db')
+def test_db():
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return "Conexão com banco OK!"
+    except Exception as e:
+        return f"Erro na conexão: {str(e)}"
 
 # Registrar um novo cliente:
 @app.route("/registrarCliente", methods=["POST"])
