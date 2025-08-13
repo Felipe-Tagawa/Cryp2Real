@@ -15,8 +15,6 @@ from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degra
 from Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
 from Backend.qr_service import QRCodeService
 
-load_dotenv()
-
 etherFlow = w3.eth.contract(address=etherFlow_address, abi=etherFlow_abi)
 sistema_cliente = w3.eth.contract(address=sistema_cliente_address, abi=sistema_cliente_abi)
 
@@ -27,13 +25,19 @@ print(merchantWallet)
 # Criar um set para inserir as contas:
 contas_usuarios = {}
 
+DB_HOST = "switchyard.proxy.rlwy.net"
+DB_PORT = 39347
+DB_USER = "root"
+DB_PASS = "nLLldXjrPdDgYwBpubKiqMhKgEqFdMXE"
+DB_NAME = "railway"
+
 db = SQLAlchemy()
 
 class Config:
     # Para desenvolvimento local
-    if os.environ.get('RAILWAY_ENVIRONMENT'):
+    if os.environ.get('RAILWAY_ENVIRONMENT'): # Se estiver web
         # Configuração para Railway
-        SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{os.environ.get('DB_USERNAME')}:{os.environ.get('DB_PASSWORD')}@{os.environ.get('DB_HOST')}:{os.environ.get('DB_PORT')}/{os.environ.get('DB_NAME')}"
+        SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     else:
         # Configuração local
         SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
