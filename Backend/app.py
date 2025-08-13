@@ -17,11 +17,6 @@ from Backend.qr_service import QRCodeService
 
 load_dotenv()
 
-if w3.is_connected():
-    print("Conectado com sucesso ao Ganache!")
-else:
-    print("Não conectado com Ganache!")
-
 etherFlow = w3.eth.contract(address=etherFlow_address, abi=etherFlow_abi)
 sistema_cliente = w3.eth.contract(address=sistema_cliente_address, abi=sistema_cliente_abi)
 
@@ -31,6 +26,8 @@ print(merchantWallet)
 
 # Criar um set para inserir as contas:
 contas_usuarios = {}
+
+db = SQLAlchemy()
 
 class Config:
     # Para desenvolvimento local
@@ -43,11 +40,39 @@ class Config:
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-app = Flask(__name__)
-CORS(app)
-app.config.from_object(Config)
-db = SQLAlchemy(app)
+def create_app():
+    global w3
 
+    app = Flask(__name__)
+    CORS(app)
+    app.config.from_object(Config)
+
+    db.init_app(app)
+
+    # Inicializa conexão com Ganache usando variável de ambiente
+    # ganache_url = os.environ.get("GANACHE_URL", "http://127.0.0.1:7545")
+    # w3 = Web3(Web3.HTTPProvider(ganache_url))
+
+    @app.before_request
+    def check_ganache():
+        if w3.is_connected():
+            print("✅ Conectado com sucesso ao Ganache!")
+            print("Conta padrão:", w3.eth.accounts[0])
+        else:
+            print("⚠️ Não conectado com Ganache!")
+
+    @app.route("/test-db")
+    def test_db():
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return "Conexão com banco OK!"
+        except Exception as e:
+            return f"Erro na conexão: {str(e)}"
+
+    return app
+
+app = create_app()
 
 class Cliente(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -149,6 +174,7 @@ def converter_wei_para_reais(valor_wei):
 def run():
     return 'API funcionando com sucesso!'
 
+"""""
 @app.route('/test-db')
 def test_db():
     try:
@@ -157,6 +183,7 @@ def test_db():
         return "Conexão com banco OK!"
     except Exception as e:
         return f"Erro na conexão: {str(e)}"
+"""""
 
 # Registrar um novo cliente:
 @app.route("/registrarCliente", methods=["POST"])
