@@ -25,19 +25,14 @@ print(merchantWallet)
 # Criar um set para inserir as contas:
 contas_usuarios = {}
 
-DB_HOST = "switchyard.proxy.rlwy.net"
-DB_PORT = 39347
-DB_USER = "root"
-DB_PASS = "nLLldXjrPdDgYwBpubKiqMhKgEqFdMXE"
-DB_NAME = "railway"
-
 db = SQLAlchemy()
 
 class Config:
     # Para desenvolvimento local
     if os.environ.get('RAILWAY_ENVIRONMENT'): # Se estiver web
         # Configuração para Railway
-        SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        SQLALCHEMY_DATABASE_URI = "mysql+pymysql://root:nLLldXjrPdDgYwBpubKiqMhKgEqFdMXE@switchyard.proxy.rlwy.net:39347/railway"
+
         print("🚀 Conectando ao banco de produção (Railway)")
     else:
         # Configuração local
