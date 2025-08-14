@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GANACHE_URL = "https://74eb8903afd2.ngrok-free.app" # "http://127.0.0.1:7545"
+GANACHE_URL = "https://3e171eefab2b.ngrok-free.app" # "http://127.0.0.1:7545"
 PRIVATE_KEY = "0x1f9f1feb9dd4a6fa9f7de741de664b2e41e834a7b9be63a04e1ae2ed8ee56a42"
 
 w3 = Web3(Web3.HTTPProvider(GANACHE_URL))
