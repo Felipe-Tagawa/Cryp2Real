@@ -32,7 +32,7 @@ class Config:
     # Para desenvolvimento local
     if os.environ.get('RAILWAY_ENVIRONMENT'): # Se estiver web
         # Configuração para Railway
-        SQLALCHEMY_DATABASE_URI = "mysql+pymysql://root:nLLldXjrPdDgYwBpubKiqMhKgEqFdMXE@switchyard.proxy.rlwy.net:39347/railway"
+        SQLALCHEMY_DATABASE_URI = os.environ.get('SQLALCHEMY_DATABASE_URI',"mysql+pymysql://root:nLLldXjrPdDgYwBpubKiqMhKgEqFdMXE@switchyard.proxy.rlwy.net:39347/sistema_blockchain_cliente")
 
         print("🚀 Conectando ao banco de produção (Railway)")
     else:
