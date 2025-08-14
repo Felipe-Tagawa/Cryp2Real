@@ -9,6 +9,7 @@ from flask import send_file
 from flask.cli import load_dotenv
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+from web3 import Web3
 
 from Backend.deploy_output import sistema_cliente_address, etherFlow_address, sistema_cliente_abi, etherFlow_abi
 from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
@@ -48,10 +49,6 @@ def create_app():
     app.config.from_object(Config)
 
     db.init_app(app)
-
-    # Inicializa conexão com Ganache usando variável de ambiente
-    # ganache_url = os.environ.get("GANACHE_URL", "http://127.0.0.1:7545")
-    # w3 = Web3(Web3.HTTPProvider(ganache_url))
 
     @app.before_request
     def check_ganache():
