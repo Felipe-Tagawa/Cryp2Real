@@ -6,13 +6,11 @@ from sqlalchemy import text
 from eth_account import Account
 from flask import Flask, jsonify, request
 from flask import send_file
-from flask.cli import load_dotenv
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from web3 import Web3
 
 from Backend.deploy_output import sistema_cliente_address, etherFlow_address, sistema_cliente_abi, etherFlow_abi
-from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
+from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade, getGanacheAccount
 from Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
 from Backend.qr_service import QRCodeService
 
@@ -38,6 +36,7 @@ class Config:
     else:
         # Configuração local
         SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
+        print("Conectado ao Banco Local")
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
@@ -212,79 +211,74 @@ def registro_cliente():
     if not senha or len(senha) < 6:
         return jsonify({"erro": "Senha deve ter pelo menos 6 caracteres"}), 400
 
-    # Criar nova conta para o usuário
-    nova_conta = Account.create()  # Esse method cria uma conta com um endereço aleatório(sem relação com o Ganache)
-    carteiraUsuario = nova_conta.address
-    private_key_user = nova_conta.key.hex()
+    try:
 
-    # Salvando a conta por referenciaPix (IMPORTANTE: uso na realizaPagamento p/ busca de qual cliente irá fazer a transferência)
-    contas_usuarios[referenciaPix] = {
-        'address': carteiraUsuario,
-        'private_key': private_key_user,
-        'email': email
-    }
+        userAddress, privateKeyUser = getGanacheAccount()
 
-    # Transferir alguns ETH para a nova conta
-    transfer_nonce = w3.eth.get_transaction_count(admWallet)
-    transfer_tx = {
-        'to': carteiraUsuario,
-        'value': w3.to_wei(0.1, 'ether'),
-        'gas': 21000,
-        'gasPrice': w3.eth.gas_price,
-        'nonce': transfer_nonce,
-        'chainId': w3.eth.chain_id
-    }
+        # Criar nova conta para o usuário
+        #nova_conta = Account.create()  # Esse method cria uma conta com um endereço aleatório(sem relação com o Ganache)
+        #carteiraUsuario = nova_conta.address
+        #private_key_user = nova_conta.key.hex()
 
-    signed_transfer = w3.eth.account.sign_transaction(transfer_tx, private_key)
-    w3.eth.send_raw_transaction(signed_transfer.raw_transaction)
-
-    nonce = w3.eth.get_transaction_count(carteiraUsuario)
-
-    transaction = sistema_cliente.functions.registrarCliente(
-        nome, referenciaPix, email, senha
-    ).build_transaction(
-        {
-            "gasPrice": w3.eth.gas_price,
-            "chainId": w3.eth.chain_id,
-            "from": carteiraUsuario,
-            "nonce": nonce,
+        # Salvando a conta por referenciaPix (IMPORTANTE: uso na realizaPagamento p/ busca de qual cliente irá fazer a transferência)
+        contas_usuarios[referenciaPix] = {
+            'address': userAddress,
+            'private_key': privateKeyUser,
+            'email': email,
+            'nome': nome
         }
-    )
 
-    receipt = sign_n_send(transaction, private_key_user)
+        nonce = w3.eth.get_transaction_count(userAddress)
 
-    # Adiciona saldo de R$10
-    cotacao = get_eth_to_brl()
-    valor_eth = 10.0 / cotacao
-    valor_wei = w3.to_wei(valor_eth, 'ether')
+        transaction = sistema_cliente.functions.registrarCliente(
+            nome, referenciaPix, email, senha
+        ).build_transaction(
+            {
+                "gasPrice": w3.eth.gas_price,
+                "chainId": w3.eth.chain_id,
+                "from": userAddress,
+                "nonce": nonce,
+            }
+        )
 
-    bonus_nonce = w3.eth.get_transaction_count(admWallet)
-    bonus_tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
-        "from": admWallet,
-        "nonce": bonus_nonce,
-        "gas": 300000,
-        "gasPrice": w3.eth.gas_price,
-        "chainId": w3.eth.chain_id
-    })
+        receipt = sign_n_send(transaction, privateKeyUser)
 
-    bonus_receipt = sign_n_send(bonus_tx, private_key)
+        # Adiciona saldo de R$10
+        cotacao = get_eth_to_brl()
+        valor_eth = 10.0 / cotacao
+        valor_wei = w3.to_wei(valor_eth, 'ether')
 
-    novoCliente = Cliente(nome=nome,
-                          referenciaPix=referenciaPix,
-                          email=email,
-                          senha=senha,
-                          carteira=carteiraUsuario)
-                          # private_key=private_key_user)
+        bonus_nonce = w3.eth.get_transaction_count(admWallet)
+        bonus_tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
+            "from": admWallet,
+            "nonce": bonus_nonce,
+            "gas": 300000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": w3.eth.chain_id
+        })
 
-    db.session.add(novoCliente)
-    db.session.commit()
+        bonus_receipt = sign_n_send(bonus_tx, private_key)
 
-    return jsonify({
-        "status": "Usuário registrado com sucesso e saldo de R$10,00 adicionado!",
-        "carteira": carteiraUsuario,
-        "tx_registro": receipt["transactionHash"].hex(),
-        "tx_bonus": bonus_receipt["transactionHash"].hex()
-    })
+        newClient = Cliente(nome=nome,
+                              referenciaPix=referenciaPix,
+                              email=email,
+                              senha=senha,
+                              carteira=userAddress,)
+
+        db.session.add(newClient)
+        db.session.commit()
+
+        print(f"✅ Cliente {nome} registrado com carteira Ganache: {userAddress}")
+
+        return jsonify({
+            "status": "Usuário registrado com sucesso!",
+            "carteira": userAddress,
+            "tx_registro": receipt["transactionHash"].hex(),
+            "tx_bonus": bonus_receipt["transactionHash"].hex()
+        })
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao registrar cliente: {str(e)}"}), 500
 
 
 # Login de usuário:

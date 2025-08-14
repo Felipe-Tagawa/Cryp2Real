@@ -104,6 +104,38 @@ def qr_padrao(data, nome_arquivo):
     caminho = salvar_qr(img, nome_arquivo)
     return caminho
 
+def getGanacheAccount():
+    global nextIndexAccount
+    if nextIndexAccount >= len(w3.eth.accounts):
+        raise Exception(f"Não há mais contas disponíveis no Ganache. Máximo: {len(w3.eth.accounts)}")
+
+    # Obtenção do endereço da conta
+    AccountAddress = w3.eth.accounts[nextIndexAccount]
+
+    # Obtençao da private key da conta
+    try:
+        privateKeyUser = w3.geth.personal.export_account(AccountAddress, "")
+    # Except caso as contas não sejam corretamente acessadas
+    except:
+
+        GanacheKey = {
+            3: "0xf553d0e7ee019f9150e5873cd5dc45662a625cb6c5e9833d956ccb2a14bf53b3",
+            4: "0x4c45293624bf4eeb1cd7dcada4a2897c4b558ae62d3a3a1b91d425351b2162a1",
+            5: "0x98f7b85ba123c94f8c93fbdb98efca82d65937d34975a19b8e9e050ca3ce7d3c"
+        }
+
+        if nextIndexAccount not in GanacheKey:
+            raise Exception(f"Chave privada não encontrada para a conta {nextIndexAccount}")
+
+        privateKeyUser = GanacheKey[nextIndexAccount]
+
+    thisAccount = nextIndexAccount
+    nextIndexAccount += 1
+
+    print(f"📝 Atribuindo conta {thisAccount} do Ganache: {AccountAddress}")
+
+    return AccountAddress, privateKeyUser
+
 """
 if __name__ == "__main__":
     url = "https://cryp2real.flutterflow.app/register"
