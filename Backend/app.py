@@ -1,23 +1,17 @@
 import os
+import hashlib
 from datetime import datetime
 from decimal import Decimal, getcontext
 
 from sqlalchemy import text
-from eth_account import Account
 from flask import Flask, jsonify, request
 from flask import send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 
-from Backend.deploy_output import sistema_cliente_address, etherFlow_address, sistema_cliente_abi, etherFlow_abi
 from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade, getGanacheAccount
-from Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
+from Backend.my_blockchain import w3, admWallet, private_key, merchantWallet, etherFlow, sistema_cliente
 from Backend.qr_service import QRCodeService
-
-etherFlow = w3.eth.contract(address=etherFlow_address, abi=etherFlow_abi)
-sistema_cliente = w3.eth.contract(address=sistema_cliente_address, abi=sistema_cliente_abi)
-
-print(merchantWallet)
 
 # listAllAccounts() -- Uso p/ Debug
 
@@ -97,6 +91,7 @@ class Transacao(db.Model):
     def __repr__(self):
         return f'<Transacao {self.id}: R${self.valor_pagamento} para {self.beneficiado}>'
 
+""""""
 def converter_reais_para_wei(valor_reais):
     """
     Converte valor em reais para wei automaticamente baseado na cotação atual
@@ -164,7 +159,7 @@ def converter_wei_para_reais(valor_wei):
     except Exception as e:
         raise Exception(f"Erro na conversão automática: {str(e)}")
 
-
+""""""
 
 @app.route('/')
 def run():
@@ -193,11 +188,12 @@ def registro_cliente():
     referenciaPix = data.get("referenciaPix", "").strip()
     email = data.get("email", "").strip()
     senha = data.get("senha", "").strip()
+    senhaHash = hashlib.sha256(senha.encode('utf-8')).hexdigest()
 
     print("Nome:", nome)
     print("Referencia Pix:", referenciaPix)
     print("Email:", email)
-    print("Senha:", senha)
+    print("SenhaHash:", senhaHash)
 
     if not nome or len(nome) < 2:
         return jsonify({"erro": "Nome deve ter pelo menos 2 caracteres"}), 400
@@ -263,7 +259,7 @@ def registro_cliente():
                               referenciaPix=referenciaPix,
                               email=email,
                               senha=senha,
-                              carteira=userAddress,)
+                              carteira=userAddress)
 
         db.session.add(newClient)
         db.session.commit()
@@ -435,6 +431,27 @@ def adicionaSaldo():
         return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
         
 """
+@app.route("/getBalance", methods=["GET"])
+def getBalance():
+    data = request.get_json()
+    if not data:
+        return jsonify({"erro": "Dados JSON fornecidos"}), 400
+
+    # Validar campos obrigatórios
+    required_fields = ["referenciaPix"]
+
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"erro": "Dados JSON fornecidos"}), 400
+
+    referenciaPix = data.get("referenciaPix")
+
+    enderecoCliente = sistema_cliente.functions.getEndereco(referenciaPix)
+
+    if not w3.is_address(enderecoCliente) or enderecoCliente == "0x0000000000000000000000000000000000000000":
+        return jsonify({"erro": "Cliente não registrado com essa referencia"}), 400
+
+    
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():
@@ -514,7 +531,7 @@ def realizaPagamento():
         nova_transacao = Transacao(
             valor_pagamento=valor_reais,
             descricao=descricao if descricao else None,
-            beneficiado="Comerciante",  # Por enquanto é constante
+            beneficiado="Comerciante",
             hash_transacao=receipt["transactionHash"].hex(),
             cliente_id=clientes.id
         )
@@ -543,9 +560,9 @@ def realizaPagamento():
 
 getcontext().prec = 18  # Define precisão alta
 
-@app.route("/transferirParaCliente", methods=["POST"])
+""" @app.route("/transferirParaCliente", methods=["POST"])
 def transferirParaCliente():
-    """Realiza transferência entre clientes usando referência PIX"""
+    # Realiza transferência entre clientes usando referência PIX
     data = request.get_json()
     if not data:
         return jsonify({"erro": "Dados JSON não fornecidos"}), 400
@@ -583,6 +600,9 @@ def transferirParaCliente():
 
         if endereco_destino == "0x0000000000000000000000000000000000000000":
             return jsonify({"erro": "Cliente destinatário não encontrado"}), 400
+
+        if endereco_origem == endereco_destino:
+            return jsonify({"erro": "Cliente destinastário não pode ser igual ao remetente"}), 400
 
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar clientes: {str(e)}"}), 500
@@ -678,7 +698,7 @@ def transferirParaCliente():
 
     except Exception as e:
         return jsonify({"erro": f"Erro ao executar transferência: {str(e)}"}), 500
-
+"""
 @app.route("/saldoComerciante", methods=["GET"])
 def getMerchantBalance():
     saldo_wei = etherFlow.functions.saldoComerciante(merchantWallet).call()

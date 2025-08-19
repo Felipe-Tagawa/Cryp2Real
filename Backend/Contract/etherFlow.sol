@@ -36,10 +36,10 @@ contract etherFlow {
     }
 
     struct Transacao {
-        address comerciante;
+        address clienteDestino;
         address pagador;
         uint256 valorTotal;
-        uint256 valorComercio;
+        uint256 valorCliente;
         uint256 valorComissao;
         uint256 valorParaOng;
         uint256 timestamp;
@@ -49,10 +49,10 @@ contract etherFlow {
     }
 
     event PagamentoRecebido(
-        address comerciante,
+        address clienteDestino,
         address pagador,
         uint256 valorTotal,
-        uint256 valorComercio,
+        uint256 valorCliente,
         uint256 valorComissao,
         uint256 valorParaOng,
         uint256 timestamp,
@@ -84,10 +84,6 @@ contract etherFlow {
         return address(this).balance;
     }
 
-    function saldoComerciante(address comerciante) public view returns (uint256) {
-        return address(comerciante).balance;
-    }
-
     function saldoCliente() public view apenasClienteRegistrado returns (uint256) {
         return clientes.saldoCliente(msg.sender);
     }
@@ -98,12 +94,12 @@ contract etherFlow {
 
     Transacao[] public transacoes;
     mapping(string => uint256) public pixParaIndiceTransacao;
-    mapping(address => uint256) public transacoesPorComerciante;
+    mapping(address => uint256) public transacoesPorCliente;
 
     function realizaPagamentoCliente(
         uint256 valor,
         string memory referenciaPix,
-        address payable comerciante
+        address payable clienteDestino // Trocar para o endereço do cliente destino
     ) public payable noReentrance apenasClienteRegistrado {
 
         uint256 saldoAtual = clientes.saldoCliente(msg.sender);
@@ -114,18 +110,18 @@ contract etherFlow {
 
         uint256 valorComissao = (valor * percentComissao) / 1000;
         uint256 valorParaOng = (valor * percentOng) / 1000;
-        uint256 valorComercio = valor - valorComissao - valorParaOng;
+        uint256 valorCliente = valor - valorComissao - valorParaOng;
 
-        transacoesPorComerciante[comerciante]++;
+        transacoesPorCliente[clienteDestino]++;
 
         string memory nomeCliente = clientes.getNomeCliente(msg.sender);
         string memory emailCliente = clientes.getEmailCliente(msg.sender);
 
         Transacao memory novaTransacao = Transacao({
-            comerciante: comerciante,
+            clienteDestino: clienteDestino,
             pagador: msg.sender,
-            valorTotal: valor, // Corrigido: era msg.value, deveria ser valor
-            valorComercio: valorComercio,
+            valorTotal: valor,
+            valorCliente: valorCliente,
             valorComissao: valorComissao,
             valorParaOng: valorParaOng,
             timestamp: block.timestamp,
@@ -141,13 +137,13 @@ contract etherFlow {
         if (contaOng != address(0)) {
             payable(contaOng).transfer(valorParaOng);
         }
-        comerciante.transfer(valorComercio);
+        clienteDestino.transfer(valorCliente); // Erro provavel
 
         emit PagamentoRecebido(
-            comerciante,
+            clienteDestino,
             msg.sender,
-            valor, // Corrigido aqui também
-            valorComercio,
+            valor,
+            valorCliente,
             valorComissao,
             valorParaOng,
             block.timestamp,
@@ -184,16 +180,16 @@ contract etherFlow {
         emit mudarComissaoFinal(_novaComissaoDono, _novaComissaoOng);
     }
 
-    function getNumeroTransacoes(address comerciante) public view returns (uint256) {
-        return transacoesPorComerciante[comerciante];
+    function getNumeroTransacoes(address clienteDestino) public view returns (uint256) {
+        return transacoesPorCliente[clienteDestino];
     }
 
-    function obterBonusPorTransacoes(address comerciante)
+    function obterBonusPorTransacoes(address clienteDestino)
         public
         view
         returns (uint256, uint256)
     {
-        uint256 numTransacoes = getNumeroTransacoes(comerciante);
+        uint256 numTransacoes = getNumeroTransacoes(clienteDestino);
         uint256 valorComissao = percentComissao;
         uint256 valorOng = percentOng;
 
@@ -241,5 +237,4 @@ contract etherFlow {
 
         emit doacaoRealizada(msg.sender, valorDoado, nomeDoador, emailDoador);
     }
-
 }

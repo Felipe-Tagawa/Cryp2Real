@@ -4,25 +4,25 @@ DROP DATABASE IF EXISTS sistema_blockchain_cliente;
 CREATE DATABASE IF NOT EXISTS sistema_blockchain_cliente;
 USE sistema_blockchain_cliente;
 
--- Tabela de Clientes
-CREATE TABLE cliente (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    nome VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    referencia_pix VARCHAR(255) NOT NULL UNIQUE,
-    senha_hash VARCHAR(255) NOT NULL,
-    carteira_endereco VARCHAR(42) NOT NULL UNIQUE, -- Endereço Ethereum (42 chars com 0x)
-    saldo_wei DECIMAL(65, 0) DEFAULT 0, -- Wei (máximo suportado pelo MySQL)
-    saldo_ether DECIMAL(20, 8) DEFAULT 0.00000000,
-    saldo_reais DECIMAL(15, 2) DEFAULT 0.00,
-    registrado BOOLEAN DEFAULT TRUE,
-    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    ativo BOOLEAN DEFAULT TRUE,
-    INDEX idx_carteira (carteira_endereco),
-    INDEX idx_pix (referencia_pix),
-    INDEX idx_email (email)
-);
+    -- Tabela de Clientes
+    CREATE TABLE cliente (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        nome VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        referencia_pix VARCHAR(255) NOT NULL UNIQUE,
+        senha_hash VARCHAR(255) NOT NULL,
+        carteira_endereco VARCHAR(42) NOT NULL UNIQUE, -- Endereço Ethereum (42 chars com 0x)
+        saldo_wei DECIMAL(65, 0) DEFAULT 0, -- Wei (máximo suportado pelo MySQL)
+        saldo_ether DECIMAL(20, 8) DEFAULT 0.00000000,
+        saldo_reais DECIMAL(15, 2) DEFAULT 0.00,
+        registrado BOOLEAN DEFAULT TRUE,
+        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        ativo BOOLEAN DEFAULT TRUE,
+        INDEX idx_carteira (carteira_endereco),
+        INDEX idx_pix (referencia_pix),
+        INDEX idx_email (email)
+    );
 
 CREATE TABLE IF NOT EXISTS transacao (
     id INT AUTO_INCREMENT PRIMARY KEY,

@@ -54,15 +54,12 @@ contract SistemaCliente {
         require(bytes(_referenciaPix).length > 0, "Referencia PIX invalida!");
         require(bytes(email).length > 0, "Email invalido!");
         require(bytes(senha).length >= 6, "Senha deve ter pelo menos 6 caracteres!");
-        // require(pixCliente[_referenciaPix] == address(0), "Referencia Pix ja utilizada anteriormente!");
-        // require(emailCliente[email] == address(0), "Email ja utilizado anteriormente!");
-
         bytes32 senhaHash = gerarHashSenha(senha, msg.sender);
 
         clientes[msg.sender] = Cliente({
             carteira: msg.sender,
             nome: nome,
-            saldo: 10 ether, // CORRIGIDO: saldo inicial em wei
+            saldo: 10 ether,
             registrado: true,
             referenciaPix: _referenciaPix,
             email: email,
@@ -195,18 +192,18 @@ contract SistemaCliente {
         _;
     }
 
-    // CORRIGIDO: Função que retorna saldo do próprio cliente
+    // Função que retorna saldo do próprio cliente
     function saldoCliente() public view apenasClienteRegistrado returns (uint256) {
         return clientes[msg.sender].saldo;
     }
 
-    // CORRIGIDO: Função que retorna saldo de qualquer cliente (para interface)
+    // Função que retorna saldo de qualquer cliente (para interface)
     function saldoCliente(address cliente) external view returns (uint256) {
         require(clientes[cliente].registrado, "Cliente nao registrado!");
         return clientes[cliente].saldo;
     }
 
-    // IMPORTANTE: Função para permitir que outros contratos atualizem o saldo
+    // Função para permitir que outros contratos atualizem o saldo
     function atualizarSaldoCliente(address cliente, uint256 novoSaldo) external {
         require(clientes[cliente].registrado, "Cliente nao registrado!");
         clientes[cliente].saldo = novoSaldo;
@@ -217,7 +214,7 @@ contract SistemaCliente {
         clientes[msg.sender].saldo += msg.value;
     }
 
-    // CORRIGIDO: Função para transferir saldo entre clientes
+    // Função para transferir saldo entre clientes
     function transferirSaldo(
         string memory _referenciaPix_origem,
         string memory _referenciaPix_destino,
@@ -229,8 +226,6 @@ contract SistemaCliente {
         require(endereco_origem != address(0), "Cliente origem nao encontrado");
         require(endereco_destino != address(0), "Cliente destino nao encontrado");
         require(msg.sender == endereco_origem, "Apenas o proprietario pode transferir");
-
-        // CORRIGIDO: Usar clientes[].saldo em vez de saldos[]
         require(clientes[endereco_origem].saldo >= _valor, "Saldo insuficiente");
 
         // Realizar transferência
@@ -240,11 +235,10 @@ contract SistemaCliente {
         emit TransferenciaSaldo(endereco_origem, endereco_destino, _valor);
     }
 
-    // CORRIGIDO: Função para consultar saldo por referência PIX
+    // Função para consultar saldo por referência PIX
     function consultarSaldo(string memory _referenciaPix) public view returns (uint256) {
         address endereco = pixParaEndereco[_referenciaPix];
         require(endereco != address(0), "Cliente nao encontrado");
-        // CORRIGIDO: Usar clientes[].saldo em vez de saldos[]
         return clientes[endereco].saldo;
     }
 }

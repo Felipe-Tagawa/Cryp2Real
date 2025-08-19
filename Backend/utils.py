@@ -104,35 +104,32 @@ def qr_padrao(data, nome_arquivo):
     caminho = salvar_qr(img, nome_arquivo)
     return caminho
 
+GANACHE_PRIVATE_KEYS = {
+    3: "0xf553d0e7ee019f9150e5873cd5dc45662a625cb6c5e9833d956ccb2a14bf53b3", # Conta do primeiro usuário
+    4: "0x4c45293624bf4eeb1cd7dcada4a2897c4b558ae62d3a3a1b91d425351b2162a1", # Conta do segundo usuário
+    5: "0x98f7b85ba123c94f8c93fbdb98efca82d65937d34975a19b8e9e050ca3ce7d3c" # Conta do terceiro usuário
+}
+
+# Índice inicial já pulando admin (0), comerciante (1) e ONG (2)
+nextIndexAccount = 3
+
 def getGanacheAccount():
     global nextIndexAccount
+
+    if nextIndexAccount < 3:
+        nextIndexAccount = 3
+
     if nextIndexAccount >= len(w3.eth.accounts):
-        raise Exception(f"Não há mais contas disponíveis no Ganache. Máximo: {len(w3.eth.accounts)}")
+        print("⚠️ Todas as contas já foram usadas. Reiniciando para conta 3.")
+        nextIndexAccount = 3
 
     # Obtenção do endereço da conta
     AccountAddress = w3.eth.accounts[nextIndexAccount]
+    privateKeyUser = GANACHE_PRIVATE_KEYS[nextIndexAccount]
 
-    # Obtençao da private key da conta
-    try:
-        privateKeyUser = w3.geth.personal.export_account(AccountAddress, "")
-    # Except caso as contas não sejam corretamente acessadas
-    except:
 
-        GanacheKey = {
-            3: "0xf553d0e7ee019f9150e5873cd5dc45662a625cb6c5e9833d956ccb2a14bf53b3",
-            4: "0x4c45293624bf4eeb1cd7dcada4a2897c4b558ae62d3a3a1b91d425351b2162a1",
-            5: "0x98f7b85ba123c94f8c93fbdb98efca82d65937d34975a19b8e9e050ca3ce7d3c"
-        }
-
-        if nextIndexAccount not in GanacheKey:
-            raise Exception(f"Chave privada não encontrada para a conta {nextIndexAccount}")
-
-        privateKeyUser = GanacheKey[nextIndexAccount]
-
-    thisAccount = nextIndexAccount
+    print(f"📝 Atribuindo conta {nextIndexAccount} do Ganache: {AccountAddress}")
     nextIndexAccount += 1
-
-    print(f"📝 Atribuindo conta {thisAccount} do Ganache: {AccountAddress}")
 
     return AccountAddress, privateKeyUser
 
