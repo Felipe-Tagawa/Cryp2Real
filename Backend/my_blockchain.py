@@ -6,7 +6,7 @@ from Backend.deploy_output import sistema_cliente_address, etherFlow_address, si
 load_dotenv()
 
 GANACHE_URL = "http://127.0.0.1:7545"
-PRIVATE_KEY = "0x1f9f1feb9dd4a6fa9f7de741de664b2e41e834a7b9be63a04e1ae2ed8ee56a42"
+PRIVATE_KEY = "0xf585ecd681060deb9f54d4b0a6dad7b23b6a7ec774c2ede437b546610be3cdef"
 
 w3 = Web3(Web3.HTTPProvider(GANACHE_URL))
 

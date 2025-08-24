@@ -71,6 +71,7 @@ class Cliente(db.Model):
     senha = db.Column(db.String(100), nullable=False)
     referenciaPix = db.Column(db.String(100), unique=True, nullable=False)
     carteira = db.Column(db.String(42), nullable=False)
+    saldo_ether = db.Column(db.Float, default=0.0)
     # private_key = db.Column(db.Text, nullable=False)
 
     # Relacionamento com transações
@@ -177,104 +178,299 @@ def test_db():
 """""
 
 # Registrar um novo cliente:
+
 @app.route("/registrarCliente", methods=["POST"])
 def registro_cliente():
-    data = request.get_json()
+    print("🚀 Iniciando registro de cliente...")
 
-    if not data:
-        return jsonify({"erro": "Dados JSON não fornecidos"}), 400
+    # Flags para controlar o que foi executado
+    account_assigned = False
+    dictionary_saved = False
+    contract_executed = False
+    db_committed = False
 
-    nome = data.get("nome", "").strip()
-    referenciaPix = data.get("referenciaPix", "").strip()
-    email = data.get("email", "").strip()
-    senha = data.get("senha", "").strip()
-    senhaHash = hashlib.sha256(senha.encode('utf-8')).hexdigest()
-
-    print("Nome:", nome)
-    print("Referencia Pix:", referenciaPix)
-    print("Email:", email)
-    print("SenhaHash:", senhaHash)
-
-    if not nome or len(nome) < 2:
-        return jsonify({"erro": "Nome deve ter pelo menos 2 caracteres"}), 400
-
-    if not referenciaPix:
-        return jsonify({"erro": "Referência PIX não pode estar vazia"}), 400
-
-    if not email:
-        return jsonify({"erro": "Email é obrigatório"}), 400
-
-    if not senha or len(senha) < 6:
-        return jsonify({"erro": "Senha deve ter pelo menos 6 caracteres"}), 400
+    # Variáveis para cleanup
+    userAddress = None
+    privateKeyUser = None
+    referenciaPix = None
+    tx_hash = None
 
     try:
+        data = request.get_json()
+        print(f"📨 Dados recebidos: {data}")
 
-        userAddress, privateKeyUser = getGanacheAccount()
+        if not data:
+            print("❌ Nenhum dado JSON fornecido")
+            return jsonify({"erro": "Dados JSON não fornecidos"}), 400
 
-        # Criar nova conta para o usuário
-        #nova_conta = Account.create()  # Esse method cria uma conta com um endereço aleatório(sem relação com o Ganache)
-        #carteiraUsuario = nova_conta.address
-        #private_key_user = nova_conta.key.hex()
+        # Extrair dados
+        nome = data.get("nome", "").strip()
+        referenciaPix = data.get("referenciaPix", "").strip()
+        email = data.get("email", "").strip()
+        senha = data.get("senha", "").strip()
+        senhaHash = hashlib.sha256(senha.encode('utf-8')).hexdigest()
 
-        # Salvando a conta por referenciaPix (IMPORTANTE: uso na realizaPagamento p/ busca de qual cliente irá fazer a transferência)
-        contas_usuarios[referenciaPix] = {
-            'address': userAddress,
-            'private_key': privateKeyUser,
-            'email': email,
-            'nome': nome
-        }
+        print("📋 Dados extraídos:")
+        print(f"  Nome: {nome}")
+        print(f"  Referencia Pix: {referenciaPix}")
+        print(f"  Email: {email}")
+        print(f"  SenhaHash: {senhaHash[:10]}...")
 
-        nonce = w3.eth.get_transaction_count(userAddress)
+        # ============= VALIDAÇÕES =============
+        if not nome or len(nome) < 2:
+            print("❌ Nome inválido")
+            return jsonify({"erro": "Nome deve ter pelo menos 2 caracteres"}), 400
 
-        transaction = sistema_cliente.functions.registrarCliente(
-            nome, referenciaPix, email, senha
-        ).build_transaction(
-            {
+        if not referenciaPix:
+            print("❌ PIX inválido")
+            return jsonify({"erro": "Referência PIX não pode estar vazia"}), 400
+
+        if not email:
+            print("❌ Email inválido")
+            return jsonify({"erro": "Email é obrigatório"}), 400
+
+        if not senha or len(senha) < 6:
+            print("❌ Senha inválida")
+            return jsonify({"erro": "Senha deve ter pelo menos 6 caracteres"}), 400
+
+        print("✅ Todas as validações básicas passaram")
+
+        # ============= VERIFICAÇÕES DE EXISTÊNCIA =============
+        print("🔍 Verificando se cliente já existe no smart contract...")
+        try:
+            endereco_existente = sistema_cliente.functions.getEndereco(referenciaPix).call()
+            print(f"  Endereço encontrado: {endereco_existente}")
+
+            if endereco_existente != "0x0000000000000000000000000000000000000000":
+                print(f"❌ Cliente com PIX '{referenciaPix}' já está registrado no contrato!")
+                print(f"   Endereço associado: {endereco_existente}")
+                return jsonify({
+                    "erro": f"Referência PIX '{referenciaPix}' já está cadastrada no blockchain!",
+                    "endereco_existente": endereco_existente
+                }), 400
+
+        except Exception as contract_check_error:
+            print(f"⚠️ Erro ao verificar contrato: {contract_check_error}")
+            # Se não conseguir verificar, é melhor falhar por segurança
+            return jsonify({"erro": "Erro ao verificar blockchain - tente novamente"}), 500
+
+        print("🔍 Verificando se cliente já existe no banco...")
+        existing_client = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
+        if existing_client:
+            print(f"❌ Cliente com PIX '{referenciaPix}' já existe no banco!")
+            return jsonify({
+                "erro": f"Referência PIX '{referenciaPix}' já está cadastrada no banco!",
+                "carteira_existente": existing_client.carteira
+            }), 400
+
+        print("🔍 Verificando se cliente já existe no dicionário...")
+        if referenciaPix in contas_usuarios:
+            print(f"❌ Cliente com PIX '{referenciaPix}' já existe no dicionário!")
+            return jsonify({
+                "erro": f"Referência PIX '{referenciaPix}' já está em uso!",
+                "endereco_existente": contas_usuarios[referenciaPix]['address']
+            }), 400
+
+        print("✅ Cliente não existe - pode prosseguir com registro")
+
+        # ============= OBTER CONTA GANACHE =============
+        print("🔍 Obtendo conta Ganache...")
+        try:
+            userAddress, privateKeyUser = getGanacheAccount()
+            account_assigned = True
+            print(f"✅ Conta obtida: {userAddress}")
+
+            # Verificar saldo inicial
+            saldo_wei = w3.eth.get_balance(userAddress)
+            saldo_eth = w3.from_wei(saldo_wei, 'ether')
+            print(f"💰 Saldo inicial da conta: {saldo_eth} ETH")
+
+        except Exception as account_error:
+            print(f"❌ Erro ao obter conta Ganache: {account_error}")
+            return jsonify({"erro": "Erro ao obter conta blockchain"}), 500
+
+        # ============= SALVAR NO DICIONÁRIO =============
+        print("💾 Salvando no dicionário de contas...")
+        try:
+            contas_usuarios[referenciaPix] = {
+                'address': userAddress,
+                'private_key': privateKeyUser,
+                'email': email,
+                'nome': nome
+            }
+            dictionary_saved = True
+            print("✅ Salvo no dicionário")
+
+        except Exception as dict_error:
+            print(f"❌ Erro ao salvar no dicionário: {dict_error}")
+            return jsonify({"erro": "Erro interno do sistema"}), 500
+
+        # ============= VERIFICAÇÃO FINAL PRÉ-CONTRATO =============
+        print("🔍 Verificação final antes do smart contract...")
+        endereco_final_check = sistema_cliente.functions.getEndereco(referenciaPix).call()
+        if endereco_final_check != "0x0000000000000000000000000000000000000000":
+            print(f"❌ RACE CONDITION: PIX foi registrado por outro processo!")
+            raise Exception(f"PIX {referenciaPix} foi registrado em paralelo")
+
+        # ============= REGISTRAR NO SMART CONTRACT =============
+        print("📝 Registrando no smart contract...")
+        try:
+            nonce = w3.eth.get_transaction_count(userAddress)
+            print(f"  Nonce: {nonce}")
+
+            print("🔧 Construindo transação com parâmetros manuais...")
+            transaction = sistema_cliente.functions.registrarCliente(
+                nome, referenciaPix, email, senha
+            ).build_transaction({
                 "gasPrice": w3.eth.gas_price,
                 "chainId": w3.eth.chain_id,
                 "from": userAddress,
                 "nonce": nonce,
-            }
-        )
+                "gas": 500000,
+            })
+            print("✅ Transação construída")
 
-        receipt = sign_n_send(transaction, privateKeyUser)
+            print("📡 Enviando transação...")
+            receipt = sign_n_send(transaction, privateKeyUser)
+            contract_executed = True
+            tx_hash = receipt["transactionHash"].hex()
+            print(f"✅ Transação enviada com sucesso! Hash: {tx_hash}")
 
-        # Adiciona saldo de R$10
-        cotacao = get_eth_to_brl()
-        valor_eth = 10.0 / cotacao
-        valor_wei = w3.to_wei(valor_eth, 'ether')
+            # Verificar saldo após transação
+            saldo_final_wei = w3.eth.get_balance(userAddress)
+            saldo_final_eth = w3.from_wei(saldo_final_wei, 'ether')
+            print(f"💰 Saldo após transação: {saldo_final_eth} ETH")
 
-        bonus_nonce = w3.eth.get_transaction_count(admWallet)
-        bonus_tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
-            "from": admWallet,
-            "nonce": bonus_nonce,
-            "gas": 300000,
-            "gasPrice": w3.eth.gas_price,
-            "chainId": w3.eth.chain_id
-        })
+        except Exception as contract_error:
+            print(f"❌ Erro no smart contract: {contract_error}")
+            raise Exception(f"Falha no blockchain: {str(contract_error)}")
 
-        bonus_receipt = sign_n_send(bonus_tx, private_key)
+        # ============= VERIFICAÇÃO FINAL PRÉ-BANCO =============
+        print("🔍 Verificação final antes do banco...")
+        existing_client_final = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
+        if existing_client_final:
+            print(f"❌ RACE CONDITION: Cliente foi criado no banco por outro processo!")
+            raise Exception(f"Cliente {referenciaPix} foi criado em paralelo no banco")
 
-        newClient = Cliente(nome=nome,
-                              referenciaPix=referenciaPix,
-                              email=email,
-                              senha=senha,
-                              carteira=userAddress)
+        # ============= SALVAR NO BANCO DE DADOS =============
+        print("💾 Salvando no banco de dados...")
+        try:
+            newClient = Cliente(
+                nome=nome,
+                referenciaPix=referenciaPix,
+                email=email,
+                senha=senhaHash,
+                carteira=userAddress,
+                saldo_ether=float(w3.from_wei(w3.eth.get_balance(userAddress), 'ether'))
+            )
 
-        db.session.add(newClient)
-        db.session.commit()
+            db.session.add(newClient)
+            db.session.commit()
+            db_committed = True
+            print("✅ Cliente salvo no banco de dados")
 
-        print(f"✅ Cliente {nome} registrado com carteira Ganache: {userAddress}")
+        except Exception as db_error:
+            print(f"❌ Erro no banco de dados: {db_error}")
+            raise Exception(f"Falha no banco de dados: {str(db_error)}")
+
+        # ============= SUCESSO =============
+        print(f"🎉 Cliente {nome} registrado com sucesso!")
+        print(f"   Carteira: {userAddress}")
+        print(f"   Saldo: {saldo_final_eth} ETH")
+        print(f"   TX Hash: {tx_hash}")
 
         return jsonify({
             "status": "Usuário registrado com sucesso!",
             "carteira": userAddress,
-            "tx_registro": receipt["transactionHash"].hex(),
-            "tx_bonus": bonus_receipt["transactionHash"].hex()
-        })
+            "saldo_inicial": f"{saldo_final_eth} ETH",
+            "tx_registro": tx_hash,
+            "referenciaPix": referenciaPix,
+            "nome": nome
+        }), 200
 
     except Exception as e:
-        return jsonify({"erro": f"Erro ao registrar cliente: {str(e)}"}), 500
+        print(f"❌ ERRO CRÍTICO: {e}")
+        print(f"   Tipo: {type(e)}")
+
+        # ============= DIAGNÓSTICO DO ESTADO =============
+        print("🔍 DIAGNÓSTICO DO ESTADO:")
+        print(f"   Account Assigned: {account_assigned}")
+        print(f"   Dictionary Saved: {dictionary_saved}")
+        print(f"   Contract Executed: {contract_executed}")
+        print(f"   DB Committed: {db_committed}")
+
+        # ============= CLEANUP E ROLLBACK =============
+        cleanup_errors = []
+
+        # 1. Rollback do banco se não foi commitado
+        if not db_committed:
+            try:
+                db.session.rollback()
+                print("✅ Rollback do banco realizado")
+            except Exception as rollback_error:
+                cleanup_errors.append(f"Erro no rollback DB: {rollback_error}")
+
+        # 2. Remover do dicionário se foi salvo
+        if dictionary_saved and referenciaPix and referenciaPix in contas_usuarios:
+            try:
+                del contas_usuarios[referenciaPix]
+                print(f"✅ Removido {referenciaPix} do dicionário")
+            except Exception as dict_cleanup_error:
+                cleanup_errors.append(f"Erro ao limpar dicionário: {dict_cleanup_error}")
+
+        # 3. Log de problemas de cleanup
+        if cleanup_errors:
+            print("⚠️ ERROS NO CLEANUP:")
+            for error in cleanup_errors:
+                print(f"   - {error}")
+
+        # ============= ANÁLISE DE CONSISTÊNCIA =============
+        if contract_executed and not db_committed:
+            print("🚨 ESTADO INCONSISTENTE DETECTADO!")
+            print(f"   Smart contract executado: ✅ (Hash: {tx_hash})")
+            print(f"   Banco de dados salvo: ❌")
+            print(f"   PIX afetado: {referenciaPix}")
+            print(f"   Endereço blockchain: {userAddress}")
+
+            return jsonify({
+                "erro": "ERRO CRÍTICO: Estado inconsistente detectado",
+                "detalhes": {
+                    "blockchain_executado": True,
+                    "banco_salvo": False,
+                    "tx_hash": tx_hash,
+                    "pix_afetado": referenciaPix,
+                    "endereco_blockchain": userAddress,
+                    "acao_recomendada": "Verificar manualmente o estado do sistema",
+                    "sugestao": f"Executar query: SELECT * FROM cliente WHERE referenciaPix='{referenciaPix}'"
+                },
+                "erro_original": str(e)
+            }), 500
+
+        elif contract_executed and db_committed:
+            # Esse caso não deveria acontecer aqui, mas por segurança
+            print("⚠️ Erro após operações completas - possível problema na resposta")
+            return jsonify({
+                "erro": "Erro inesperado após registro completo",
+                "status_operacao": "Possivelmente concluído com sucesso",
+                "tx_hash": tx_hash,
+                "verificar_banco": f"SELECT * FROM cliente WHERE referenciaPix='{referenciaPix}'"
+            }), 500
+
+        # ============= TRACEBACK PARA DEBUG =============
+        import traceback
+        print("📋 Traceback completo:")
+        traceback.print_exc()
+
+        # ============= RESPOSTA DE ERRO PADRÃO =============
+        return jsonify({
+            "erro": f"Erro ao registrar cliente: {str(e)}",
+            "estado_sistema": {
+                "conta_atribuida": account_assigned,
+                "dicionario_salvo": dictionary_saved,
+                "contrato_executado": contract_executed,
+                "banco_commitado": db_committed
+            }
+        }), 500
 
 
 # Login de usuário:
@@ -431,27 +627,85 @@ def adicionaSaldo():
         return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
         
 """
+
+
 @app.route("/getBalance", methods=["GET"])
 def getBalance():
-    data = request.get_json()
-    if not data:
-        return jsonify({"erro": "Dados JSON fornecidos"}), 400
+    try:
+        referenciaPix = request.args.get("referenciaPix")
+        print(referenciaPix)
 
-    # Validar campos obrigatórios
-    required_fields = ["referenciaPix"]
+        if not referenciaPix:
+            return jsonify({"erro": "É necessário fornecer referenciaPix"}), 400
 
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"erro": "Dados JSON fornecidos"}), 400
+        print(f"🔍 Consultando saldo para PIX: {referenciaPix}")
 
-    referenciaPix = data.get("referenciaPix")
+        # 1. PRIORIDADE: Buscar no banco de dados
+        cliente = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
 
-    enderecoCliente = sistema_cliente.functions.getEndereco(referenciaPix)
+        if cliente:
+            print(f"✅ Cliente encontrado no banco: {cliente.carteira}")
+            address = cliente.carteira
 
-    if not w3.is_address(enderecoCliente) or enderecoCliente == "0x0000000000000000000000000000000000000000":
-        return jsonify({"erro": "Cliente não registrado com essa referencia"}), 400
+            # Saldo atual do blockchain (sempre mais atualizado)
+            saldo_wei = w3.eth.get_balance(address)
+            saldo_eth = w3.from_wei(saldo_wei, "ether")
 
-    
+            # Saldo do banco (pode estar desatualizado)
+            saldo_banco = cliente.saldo_ether
+
+            print(f"💰 Saldos encontrados:")
+            print(f"   Blockchain: {saldo_eth} ETH")
+            print(f"   Banco: {saldo_banco} ETH")
+
+            # OPCIONAL: Atualizar saldo no banco se diferente
+            if abs(float(saldo_eth) - float(saldo_banco)) > 0.001:
+                print(f"🔄 Atualizando saldo no banco: {saldo_banco} → {saldo_eth}")
+                cliente.saldo_ether = float(saldo_eth)
+                db.session.commit()
+
+            return jsonify({
+                "referenciaPix": referenciaPix,
+                "endereco": address,
+                "saldo_wei": str(saldo_wei),
+                "saldo_eth": str(saldo_eth),
+                "saldo_banco": str(saldo_banco),
+                "fonte_dados": "banco_de_dados",
+                "nome": cliente.nome,
+                "email": cliente.email
+            }), 200
+
+        # 2. FALLBACK: Buscar no dicionário se não encontrar no banco
+        print(f"⚠️ Cliente não encontrado no banco, tentando dicionário...")
+        conta = contas_usuarios.get(referenciaPix)
+
+        if not conta:
+            print(f"❌ Cliente não encontrado nem no banco nem no dicionário")
+            return jsonify({"erro": "Cliente não encontrado"}), 404
+
+        print(f"✅ Cliente encontrado no dicionário: {conta['address']}")
+        address = conta["address"]
+        saldo_wei = w3.eth.get_balance(address)
+        saldo_eth = w3.from_wei(saldo_wei, "ether")
+
+        print(f"💰 Saldo do dicionário: {saldo_eth} ETH")
+
+        return jsonify({
+            "referenciaPix": referenciaPix,
+            "endereco": address,
+            "saldo_wei": str(saldo_wei),
+            "saldo_eth": str(saldo_eth),
+            "fonte_dados": "dicionario_memoria",
+            "aviso": "Dados podem estar desatualizados - cliente não encontrado no banco"
+        }), 200
+
+    except Exception as e:
+        print(f"❌ Erro ao buscar saldo: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"erro": f"Erro ao buscar saldo: {str(e)}"}), 500
+
+
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():
@@ -887,6 +1141,51 @@ def gerar_qrcodes():
             "comerciante": caminhos['comerciante']
         }
     }
+
+"""
+tx_hash = sistema_cliente.functions.removerCliente("0x5f4728a5c5Fc3359f23cCF08e047B406581BD37a").transact({'from': '0xD367327eECdA3e961f4c849ecfC6Aaf38844920C'})
+w3.eth.wait_for_transaction_receipt(tx_hash)
+print("Cliente removido com sucesso!")
+"""
+
+
+@app.route("/debug/limpar-contas", methods=["POST"])
+def limpar_contas_debug():
+    """APENAS PARA DEBUG - Remove todas as contas do dicionário"""
+    global contas_usuarios
+
+    contas_antes = len(contas_usuarios)
+    contas_salvas = dict(contas_usuarios)  # Backup para log
+
+    # Limpar dicionário
+    contas_usuarios.clear()
+
+    print(f"🧹 Dicionário limpo! {contas_antes} contas removidas:")
+    for pix, info in contas_salvas.items():
+        print(f"   - {pix}: {info['address']}")
+
+    return jsonify({
+        "status": "Dicionário limpo com sucesso!",
+        "contas_removidas": contas_antes,
+        "contas_removidas_detalhes": {
+            pix: info['address'] for pix, info in contas_salvas.items()
+        }
+    })
+
+# Endpoint para ver status atual
+@app.route("/debug/status-contas", methods=["GET"])
+def status_contas_debug():
+    """Mostra o status atual das contas"""
+    return jsonify({
+        "total_contas_dicionario": len(contas_usuarios),
+        "contas_ativas": {
+            pix: {
+                "address": info['address'],
+                "nome": info['nome'],
+                "email": info['email']
+            } for pix, info in contas_usuarios.items()
+        }
+    })
 
 if __name__ == '__main__':
     with app.app_context():

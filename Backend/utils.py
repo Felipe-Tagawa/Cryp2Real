@@ -1,4 +1,5 @@
 # Funções auxiliares
+# from Backend.app import Cliente, contas_usuarios
 from Backend.my_blockchain import w3
 import requests
 import qrcode
@@ -105,9 +106,9 @@ def qr_padrao(data, nome_arquivo):
     return caminho
 
 GANACHE_PRIVATE_KEYS = {
-    3: "0xf553d0e7ee019f9150e5873cd5dc45662a625cb6c5e9833d956ccb2a14bf53b3", # Conta do primeiro usuário
-    4: "0x4c45293624bf4eeb1cd7dcada4a2897c4b558ae62d3a3a1b91d425351b2162a1", # Conta do segundo usuário
-    5: "0x98f7b85ba123c94f8c93fbdb98efca82d65937d34975a19b8e9e050ca3ce7d3c" # Conta do terceiro usuário
+    3: "0xc6ede890317519c2a17cbf1aaf24763c3373b14a5bacd9b12b429d4fa22511df", # Conta do primeiro usuário
+    4: "0x21af7d9b31bb12c704f9b2794e943f55e7727676882227e2a0e1a1870db8e905", # Conta do segundo usuário
+    5: "0xfc627e2e4bce3d9e8413cb311154ccff512c1949ed035036fa4cff88fede7707" # Conta do terceiro usuário
 }
 
 # Índice inicial já pulando admin (0), comerciante (1) e ONG (2)
@@ -116,22 +117,45 @@ nextIndexAccount = 3
 def getGanacheAccount():
     global nextIndexAccount
 
-    if nextIndexAccount < 3:
+    # Só inicializa se ainda não foi inicializado
+    if nextIndexAccount is None:
         nextIndexAccount = 3
 
     if nextIndexAccount >= len(w3.eth.accounts):
         print("⚠️ Todas as contas já foram usadas. Reiniciando para conta 3.")
         nextIndexAccount = 3
 
-    # Obtenção do endereço da conta
     AccountAddress = w3.eth.accounts[nextIndexAccount]
     privateKeyUser = GANACHE_PRIVATE_KEYS[nextIndexAccount]
-
 
     print(f"📝 Atribuindo conta {nextIndexAccount} do Ganache: {AccountAddress}")
     nextIndexAccount += 1
 
     return AccountAddress, privateKeyUser
+
+'''def getGanacheWallet(referenciaPix):
+    try:
+        if referenciaPix in contas_usuarios:
+            wallet_address = contas_usuarios[referenciaPix]['address']
+            nome = contas_usuarios[referenciaPix].get('nome', 'N/A')
+            print(f"💳 Carteira encontrada no dicionário para {nome} ({referenciaPix}): {wallet_address}")
+            return wallet_address
+        # Fallback: busca no banco de dados SQLAlchemy
+        cliente = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
+
+        if cliente:
+            wallet_address = cliente.carteira
+            print(f"💳 Carteira encontrada no banco para {cliente.nome} ({referenciaPix}): {wallet_address}")
+            return wallet_address
+        else:
+            print(f"❌ Cliente com referência PIX '{referenciaPix}' não encontrado em nenhum local")
+            return None
+
+    except Exception as e:
+        print(f"❌ Erro ao buscar carteira para referência PIX '{referenciaPix}': {e}")
+        return None
+'''
+
 
 """
 if __name__ == "__main__":
