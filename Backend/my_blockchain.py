@@ -20,7 +20,5 @@ ongWallet = account[2]  # conta ONG
 nova_conta = Account.create()
 private_key_comerciante = nova_conta.key.hex()
 
-private_key = PRIVATE_KEY
-
 etherFlow = w3.eth.contract(address=etherFlow_address, abi=etherFlow_abi)
 sistema_cliente = w3.eth.contract(address=sistema_cliente_address, abi=sistema_cliente_abi)
