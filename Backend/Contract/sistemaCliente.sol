@@ -129,12 +129,25 @@ contract SistemaCliente {
         return true;
     }
 
-    function removerCliente(address cliente) public {
-        require(msg.sender == dono, "Apenas o dono pode remover clientes");
+    function removerCliente(address cliente) public apenasDono {
         require(clientes[cliente].registrado, "Cliente nao existe");
 
+        // Limpa os mappings de referência
+        string memory referenciaPix = clientes[cliente].referenciaPix;
+        string memory email = clientes[cliente].email;
+
+        if (bytes(referenciaPix).length > 0) {
+            delete pixCliente[referenciaPix];
+        }
+
+        if (bytes(email).length > 0) {
+            delete emailCliente[email];
+        }
+
+        // Apaga o cliente
         delete clientes[cliente];
     }
+
 
     function alterarSenha(string memory senhaAtual, string memory novaSenha)
         public
