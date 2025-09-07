@@ -7,7 +7,7 @@ import json
 from PIL import Image
 
 # CONFIGURAÇÃO CORRIGIDA
-GANACHE_INITIAL_BALANCE = 200  # CORRIGIDO: 200 ETH em vez de 100
+GANACHE_INITIAL_BALANCE = 200
 BALANCE_TOLERANCE = 0.01  # Tolerância de 0.01 ETH para gas fees
 
 # Mapeamento das chaves privadas DISPONÍVEIS
@@ -72,13 +72,13 @@ def reset_accounts_control():
         for cliente in ganache_accounts:
             # verifica se o cliente está registrado
             if sistema_cliente.functions.ClienteRegistrado(cliente).call():
-                tx = sistema_cliente.functions.removerCliente(cliente).buildTransaction({
+                tx = sistema_cliente.functions.removerCliente(cliente).build_transaction({
                     'from': owner_account,
                     'gas': 200000,
                     'nonce': w3.eth.get_transaction_count(owner_account)
                 })
                 signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-                tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
                 w3.eth.wait_for_transaction_receipt(tx_hash)
                 print(f"✅ Cliente {cliente} removido com sucesso")
             else:
@@ -122,7 +122,6 @@ def getGanacheAccount():
 
     available_accounts = sorted(GANACHE_PRIVATE_KEYS.keys())
     temp_used_accounts = used_accounts.copy()  # cópia em memória para atomicidade
-
     try:
         for account_index in available_accounts:
             if account_index >= len(w3.eth.accounts):
@@ -157,7 +156,6 @@ def getGanacheAccount():
             # ✅ Conta disponível encontrada
             print(f"   ✅ Conta {account_index} DISPONÍVEL: {current_balance:.6f} ETH (diferença: {difference:.6f})")
             print(f"   📍 Endereço: {account_address}")
-
             # Marca em memória
             temp_used_accounts.append(account_address)
 

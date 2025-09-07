@@ -17,7 +17,6 @@ from Backend.qr_service import QRCodeService
 # listAllAccounts() -- Uso p/ Debug
 
 # Criar um set para inserir as contas:
-#contas_usuarios = {}
 
 db = SQLAlchemy()
 
@@ -73,6 +72,7 @@ class Cliente(db.Model):
     referenciaPix = db.Column(db.String(100), unique=True, nullable=False)
     carteira = db.Column(db.String(42), nullable=False)
     saldo_ether = db.Column(db.Float, default=0.0)
+    saldo_reais = db.Column(db.Float, default=0.0)
     private_key = db.Column(db.Text, nullable=False)
 
     # Relacionamento com transações
