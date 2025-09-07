@@ -188,6 +188,7 @@ def registro_cliente():
         referenciaPix = data.get("referenciaPix", "").strip()
         email = data.get("email", "").strip()
         senha = data.get("senha", "").strip()
+        # Insira aqui o saldo do cliente - saldo_eth
         senhaHash = hashlib.sha256(senha.encode('utf-8')).hexdigest()
 
 
@@ -244,7 +245,8 @@ def registro_cliente():
             "saldo_inicial": f"{w3.from_wei(w3.eth.get_balance(userAddress), 'ether')} ETH",
             "tx_registro": receipt["transactionHash"].hex(),
             "referenciaPix": referenciaPix,
-            "nome": nome
+            "nome": nome,
+            "email": email
             }), 200
     except Exception as e:
         db.session.rollback()
@@ -338,65 +340,35 @@ def mostraInfoCliente():
         
 """
 
-""" Usar o AppState
-@app.route("/adicionaSaldo", methods=["POST"])
-def adicionaSaldo():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"erro": "Dados JSON não fornecidos"}), 400
-
-        referenciaPix = data.get("referenciaPix")
-        valor_reais = data.get("valor_reais")
-
-        if not referenciaPix:
-            return jsonify({"erro": "Referencia Pix não fornecida"}), 400
-
-        try:
-            valor_reais = float(valor_reais)
-            if valor_reais <= 0:
-                return jsonify({"erro": "Valor deve ser maior que zero"}), 400
-        except (ValueError, TypeError):
-            return jsonify({"erro": "Valor inválido. Deve ser um número positivo."}), 400
-
-        try:
-            cotacao = get_eth_to_brl()
-        except Exception as e:
-            return jsonify({"erro": f"Erro ao buscar cotação: {str(e)}"}), 500
-
-        valor_eth = valor_reais / cotacao
-        valor_wei = w3.to_wei(valor_eth, 'ether')
-
-        nonce = w3.eth.get_transaction_count(admWallet)
-        tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
-            "from": admWallet,
-            "nonce": nonce,
-            "gas": 300000,
-            "gasPrice": w3.eth.gas_price,
-            "chainId": w3.eth.chain_id
-        })
-
-        receipt = sign_n_send(tx, private_key)
-
-        return jsonify({
-            "status": "Saldo adicionado com sucesso!",
-            "tx_hash": receipt["transactionHash"].hex(),
-            "valor_reais": valor_reais,
-            "valor_eth": valor_eth,
-            "valor_wei": valor_wei,
-            "cotacao_eth_brl": cotacao
-        })
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
-        
-"""
 
 
 @app.route("/getBalance", methods=["GET"])
 def getBalance():
+    try:
+        email = request.args.get("email")
+        if not email:
+            return jsonify({"erro": "É necessário fornecer email"}), 400
+
+        # Log para debug
+        print(f"Query parameters recebidos: {dict(request.args)}")
+        print(f"Headers: {dict(request.headers)}")
+
+        email = request.args.get("email")
+        print(f"Email recebido: {email}")
+
+        cliente = Cliente.query.filter_by(email=email).first()
+        if not cliente:
+            return jsonify({"erro": "Cliente não encontrado"}), 404
+
+        return jsonify({
+            #"saldo_reais": cliente.saldo_reais,
+            "saldo_eth": cliente.saldo_ether
+        }), 200
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao buscar saldo: {str(e)}"}), 500
+
+    """"
     try:
         email = request.args.get("email")
         if not email:
@@ -429,7 +401,7 @@ def getBalance():
         "timestamp": datetime.utcnow().isoformat()
         }), 200
     except Exception as e:
-        return jsonify({"erro": f"Erro interno ao buscar saldo: {str(e)}"}), 500
+        return jsonify({"erro": f"Erro interno ao buscar saldo: {str(e)}"}), 500"""
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():

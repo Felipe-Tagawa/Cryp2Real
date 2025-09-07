@@ -8,7 +8,7 @@ from PIL import Image
 
 # CONFIGURAÇÃO CORRIGIDA
 GANACHE_INITIAL_BALANCE = 200
-BALANCE_TOLERANCE = 0.01  # Tolerância de 0.01 ETH para gas fees
+BALANCE_TOLERANCE = 1  # Tolerância de 0.01 ETH para gas fees
 
 # Mapeamento das chaves privadas DISPONÍVEIS
 GANACHE_PRIVATE_KEYS = {
