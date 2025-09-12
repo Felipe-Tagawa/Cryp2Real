@@ -87,6 +87,7 @@ class Transacao(db.Model):
     beneficiado = db.Column(db.String(100), nullable=False)  # Nome do beneficiado
     data_transacao = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     hash_transacao = db.Column(db.String(66), nullable=False)  # Hash da transação blockchain
+    tipo_transacao = db.Column(db.String(100), nullable=False)  # eth_direto ou sem_taxas
 
     # Chave estrangeira para o cliente
     cliente_id = db.Column(db.Integer, db.ForeignKey('cliente.id'), nullable=False)
@@ -345,54 +346,72 @@ def mostraInfoCliente():
         
 """
 
+
 @app.route("/getBalance", methods=["GET"])
 def getBalance():
     try:
-        # Pega o cliente logado a partir da sessão
-        cliente_id = session.get("cliente_id")
-        if not cliente_id:
-            return jsonify({"erro": "Usuário não autenticado!"}), 401
+        # Inicializar variáveis
+        saldo_interno_wei = None
+        saldo_interno_eth = None
 
-        # Busca cliente no banco
-        cliente = Cliente.query.get(cliente_id)
-        if not cliente:
-            return jsonify({"erro": "Cliente não encontrado"}), 404
+        referencia_pix = request.args.get('referenciaPix')
 
-        # Pega saldo da carteira na blockchain
+        if referencia_pix:
+            cliente = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
+            if not cliente:
+                return jsonify({"erro": "Cliente não encontrado"}), 404
+        else:
+            cliente_id = session.get("cliente_id")
+            if not cliente_id:
+                return jsonify({"erro": "referenciaPix obrigatória na query string ou sessão válida"}), 400
+            cliente = Cliente.query.get(cliente_id)
+            if not cliente:
+                return jsonify({"erro": "Cliente da sessão não encontrado"}), 404
+
         address = w3.to_checksum_address(cliente.carteira)
+
+        # Saldo real da carteira ETH
         saldo_wei = w3.eth.get_balance(address)
         saldo_eth = w3.from_wei(saldo_wei, "ether")
 
-        # Converte ETH para BRL
+        # Saldo interno no contrato
         try:
-            cotacao_eth_brl = get_eth_to_brl()
-            saldo_brl = float(saldo_eth) * cotacao_eth_brl
+            saldo_interno_wei = etherFlow.functions.saldoCliente(address).call()
+            saldo_interno_eth = w3.from_wei(saldo_interno_wei, "ether")
         except Exception as e:
-            print(f"Erro ao buscar cotação: {e}")
-            cotacao_eth_brl = None
-            saldo_brl = None
+            print(f"Erro ao buscar saldo interno: {e}")
+            saldo_interno_wei = None
+            saldo_interno_eth = None
+
+        # CONVERSÃO SIMPLIFICADA: 1 ETH = 1 BRL
+        cotacao_eth_brl = 1.0
+
+        saldo_brl = float(saldo_eth) * cotacao_eth_brl  # Sempre 1:1
+        saldo_interno_brl = float(saldo_interno_eth) * cotacao_eth_brl if saldo_interno_eth else None
 
         return jsonify({
             "status": "sucesso",
-            "cliente": {
-                "id": cliente.id,
-                "nome": cliente.nome,
-                "email": cliente.email,
-                "referenciaPix": cliente.referenciaPix,
-                "carteira": address
-            },
-            "saldo": {
-                "wei": str(saldo_wei),
-                "eth": f"{saldo_eth:.6f}",
-                "brl": round(saldo_brl, 2) if saldo_brl is not None else None,
-                "cotacao_eth_brl": round(cotacao_eth_brl, 2) if cotacao_eth_brl is not None else None
-            },
-            "fonte_dados": "ganache_blockchain",
+            "cliente_id": cliente.id,
+            "nome": cliente.nome,
+            "email": cliente.email,
+            "referenciaPix": cliente.referenciaPix,
+            "carteira": address,
+
+            # Saldos principais (agora iguais!)
+            "balance_eth": float(saldo_eth),
+            "balance_brl": round(saldo_brl, 2),
+            "balance_interno_eth": float(saldo_interno_eth) if saldo_interno_eth else None,
+            "balance_interno_brl": round(saldo_interno_brl, 2) if saldo_interno_brl else None,
+
+            # Info do sistema
+            "cotacao_eth_brl": cotacao_eth_brl,  # Sempre 1.0
+            "fonte_dados": "ganache_blockchain + etherFlow (1ETH = 1BRL)",
             "timestamp": datetime.utcnow().isoformat()
         }), 200
 
     except Exception as e:
         return jsonify({"erro": f"Erro interno ao buscar saldo: {str(e)}"}), 500
+
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():

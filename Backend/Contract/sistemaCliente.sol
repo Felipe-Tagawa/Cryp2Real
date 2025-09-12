@@ -227,12 +227,6 @@ contract SistemaCliente {
         return emailCliente[email];
     }
 
-    // ========== Saldos internos ==========
-    // saldo do proprio cliente
-    function saldoCliente() public view apenasClienteRegistrado returns (uint256) {
-        return clientes[msg.sender].saldo;
-    }
-
     // saldo de qualquer cliente (para UI)
     function saldoCliente(address cliente) external view returns (uint256) {
         require(clientes[cliente].registrado, "Cliente nao registrado!");
