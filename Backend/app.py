@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal, getcontext
 
 from sqlalchemy import text
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session
 from flask import send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -63,6 +63,7 @@ def create_app():
     return app
 
 app = create_app()
+app.secret_key = os.urandom(24)
 
 class Cliente(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -238,6 +239,10 @@ def registro_cliente():
         db.session.add(newClient)
         db.session.commit()
 
+        # Salva na sessão para já estar logado
+        #session['cliente_id'] = newClient.id
+        session['email'] = newClient.email
+        session['carteira'] = newClient.carteira
 
         return jsonify({
             "status": "Usuário registrado com sucesso!",
@@ -340,68 +345,54 @@ def mostraInfoCliente():
         
 """
 
-
-
 @app.route("/getBalance", methods=["GET"])
 def getBalance():
     try:
-        email = request.args.get("email")
-        if not email:
-            return jsonify({"erro": "É necessário fornecer email"}), 400
+        # Pega o cliente logado a partir da sessão
+        cliente_id = session.get("cliente_id")
+        if not cliente_id:
+            return jsonify({"erro": "Usuário não autenticado!"}), 401
 
-        # Log para debug
-        print(f"Query parameters recebidos: {dict(request.args)}")
-        print(f"Headers: {dict(request.headers)}")
-
-        email = request.args.get("email")
-        print(f"Email recebido: {email}")
-
-        cliente = Cliente.query.filter_by(email=email).first()
+        # Busca cliente no banco
+        cliente = Cliente.query.get(cliente_id)
         if not cliente:
             return jsonify({"erro": "Cliente não encontrado"}), 404
 
-        return jsonify({
-            #"saldo_reais": cliente.saldo_reais,
-            "saldo_eth": cliente.saldo_ether
-        }), 200
-
-    except Exception as e:
-        return jsonify({"erro": f"Erro ao buscar saldo: {str(e)}"}), 500
-
-    """"
-    try:
-        email = request.args.get("email")
-        if not email:
-            return jsonify({"erro": "É necessário fornecer email"}), 400
-        cliente = Cliente.query.filter_by(email=email).first()
-        if not cliente:
-            return jsonify({"erro": "Cliente não encontrado"}), 404
+        # Pega saldo da carteira na blockchain
         address = w3.to_checksum_address(cliente.carteira)
         saldo_wei = w3.eth.get_balance(address)
         saldo_eth = w3.from_wei(saldo_wei, "ether")
-        cotacao_eth_brl = get_eth_to_brl()
-        saldo_brl = float(saldo_eth) * cotacao_eth_brl
+
+        # Converte ETH para BRL
+        try:
+            cotacao_eth_brl = get_eth_to_brl()
+            saldo_brl = float(saldo_eth) * cotacao_eth_brl
+        except Exception as e:
+            print(f"Erro ao buscar cotação: {e}")
+            cotacao_eth_brl = None
+            saldo_brl = None
+
         return jsonify({
-        "status": "sucesso",
-        "email": email,
-        "cliente": {
-        "id": cliente.id,
-        "nome": cliente.nome,
-        "email": cliente.email,
-        "referenciaPix": cliente.referenciaPix,
-        "endereco": address
-        },
-        "saldo": {
-        "wei": str(saldo_wei),
-        "eth": f"{saldo_eth:.6f}",
-        "brl": round(saldo_brl, 2),
-        "cotacao_eth_brl": round(cotacao_eth_brl, 2)
-        },
-        "fonte_dados": "ganache_blockchain",
-        "timestamp": datetime.utcnow().isoformat()
+            "status": "sucesso",
+            "cliente": {
+                "id": cliente.id,
+                "nome": cliente.nome,
+                "email": cliente.email,
+                "referenciaPix": cliente.referenciaPix,
+                "carteira": address
+            },
+            "saldo": {
+                "wei": str(saldo_wei),
+                "eth": f"{saldo_eth:.6f}",
+                "brl": round(saldo_brl, 2) if saldo_brl is not None else None,
+                "cotacao_eth_brl": round(cotacao_eth_brl, 2) if cotacao_eth_brl is not None else None
+            },
+            "fonte_dados": "ganache_blockchain",
+            "timestamp": datetime.utcnow().isoformat()
         }), 200
+
     except Exception as e:
-        return jsonify({"erro": f"Erro interno ao buscar saldo: {str(e)}"}), 500"""
+        return jsonify({"erro": f"Erro interno ao buscar saldo: {str(e)}"}), 500
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():
@@ -649,6 +640,258 @@ def transferirParaCliente():
     except Exception as e:
         return jsonify({"erro": f"Erro ao executar transferência: {str(e)}"}), 500
 """
+
+
+@app.route("/transferirEntreUsers", methods=["POST"])
+def transferirEntreUsers():
+    data = request.get_json()
+    if not data:
+        return jsonify({"erro": "Dados JSON não fornecidos"}), 400
+
+    # Validar campos obrigatórios
+    required_fields = ['referencia_origem', 'referencia_destino', 'tipo_transferencia']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"erro": f"Campo '{field}' é obrigatório"}), 400
+
+    referencia_origem = data['referencia_origem']
+    referencia_destino = data['referencia_destino']
+    tipo_transferencia = data['tipo_transferencia']  # 'saldo_interno', 'eth_direto', 'sem_taxas'
+    descricao = data.get('descricao', '')
+
+    # Verificar auto-transferência
+    if referencia_origem == referencia_destino:
+        return jsonify({"erro": "Não é possível transferir para si mesmo"}), 400
+
+    # Buscar endereços
+    endereco_origem = sistema_cliente.functions.getEnderecoPorPix(referencia_origem).call()
+    endereco_destino = sistema_cliente.functions.getEnderecoPorPix(referencia_destino).call()
+
+    if not w3.is_address(endereco_origem) or endereco_origem == "0x0000000000000000000000000000000000000000":
+        return jsonify({"erro": "Usuário de origem não registrado"}), 400
+
+    if not w3.is_address(endereco_destino) or endereco_destino == "0x0000000000000000000000000000000000000000":
+        return jsonify({"erro": "Usuário de destino não registrado"}), 400
+
+    # Buscar dados do cliente origem
+    cliente_origem = Cliente.query.filter_by(referenciaPix=referencia_origem).first()
+    if not cliente_origem:
+        return jsonify({"erro": "Cliente origem não encontrado no banco de dados"}), 400
+
+    private_key_origem = cliente_origem.private_key
+    nonce = w3.eth.get_transaction_count(endereco_origem)
+
+    try:
+        # OPÇÃO 1: Transferência usando saldo interno do contrato
+        if tipo_transferencia == 'saldo_interno':
+            if 'valor' not in data:
+                return jsonify({"erro": "Campo 'valor' é obrigatório para transferência por saldo interno"}), 400
+
+            valor = float(data['valor'])
+            valor_wei = w3.to_wei(valor, 'ether')
+
+            # Verificar saldo interno
+            saldo_interno = etherFlow.functions.consultarSaldoInterno(endereco_origem).call()
+            if saldo_interno < valor_wei:
+                return jsonify({
+                    "erro": "Saldo interno insuficiente",
+                    "saldo_interno_eth": float(w3.from_wei(saldo_interno, 'ether')),
+                    "valor_solicitado": valor
+                }), 400
+
+            transaction = etherFlow.functions.transferirParaUsuario(
+                valor_wei,
+                referencia_origem,  # Usar como referência da transação
+                endereco_destino
+            ).build_transaction({
+                "from": endereco_origem,
+                "nonce": nonce,
+                "gasPrice": w3.eth.gas_price,
+            })
+
+        # OPÇÃO 2: Transferência ETH direto com taxas
+        elif tipo_transferencia == 'eth_direto':
+            if 'valor_eth' not in data:
+                return jsonify({"erro": "Campo 'valor_eth' é obrigatório para transferência ETH direto"}), 400
+
+            valor_eth = float(data['valor_eth'])
+            valor_wei = w3.to_wei(valor_eth, 'ether')
+
+            # Verificar saldo ETH
+            saldo_eth = w3.eth.get_balance(endereco_origem)
+            gas_estimate = etherFlow.functions.transferirETHDireto(
+                referencia_origem, endereco_destino
+            ).estimate_gas({"from": endereco_origem, "value": valor_wei})
+
+            gas_cost = gas_estimate * w3.eth.gas_price
+            total_necessario = valor_wei + gas_cost
+
+            if saldo_eth < total_necessario:
+                return jsonify({
+                    "erro": "Saldo ETH insuficiente",
+                    "saldo_atual_eth": float(w3.from_wei(saldo_eth, 'ether')),
+                    "valor_transferencia": valor_eth,
+                    "gas_estimado_eth": float(w3.from_wei(gas_cost, 'ether')),
+                    "total_necessario_eth": float(w3.from_wei(total_necessario, 'ether'))
+                }), 400
+
+            transaction = etherFlow.functions.transferirETHDireto(
+                referencia_origem,
+                endereco_destino
+            ).build_transaction({
+                "from": endereco_origem,
+                "nonce": nonce,
+                "gasPrice": w3.eth.gas_price,
+                "value": valor_wei
+            })
+
+        # OPÇÃO 3: Transferência sem taxas (P2P puro)
+        elif tipo_transferencia == 'sem_taxas':
+            if 'valor_eth' not in data:
+                return jsonify({"erro": "Campo 'valor_eth' é obrigatório para transferência sem taxas"}), 400
+
+            valor_eth = float(data['valor_eth'])
+            valor_wei = w3.to_wei(valor_eth, 'ether')
+
+            # Verificar saldo ETH
+            saldo_eth = w3.eth.get_balance(endereco_origem)
+            gas_estimate = etherFlow.functions.transferenciaSemTaxas(
+                referencia_origem, endereco_destino
+            ).estimate_gas({"from": endereco_origem, "value": valor_wei})
+
+            gas_cost = gas_estimate * w3.eth.gas_price
+            total_necessario = valor_wei + gas_cost
+
+            if saldo_eth < total_necessario:
+                return jsonify({
+                    "erro": "Saldo ETH insuficiente",
+                    "saldo_atual_eth": float(w3.from_wei(saldo_eth, 'ether')),
+                    "valor_transferencia": valor_eth,
+                    "gas_estimado_eth": float(w3.from_wei(gas_cost, 'ether')),
+                    "total_necessario_eth": float(w3.from_wei(total_necessario, 'ether'))
+                }), 400
+
+            transaction = etherFlow.functions.transferenciaSemTaxas(
+                referencia_origem,
+                endereco_destino
+            ).build_transaction({
+                "from": endereco_origem,
+                "nonce": nonce,
+                "gasPrice": w3.eth.gas_price,
+                "value": valor_wei
+            })
+
+        else:
+            return jsonify(
+                {"erro": "Tipo de transferência inválido. Use: 'saldo_interno', 'eth_direto', ou 'sem_taxas'"}), 400
+
+        # Assinar e enviar transação
+        receipt = sign_n_send(transaction, private_key_origem)
+
+        # Registrar no banco de dados
+        try:
+            cliente_origem_db = Cliente.query.filter_by(referenciaPix=referencia_origem).first()
+            cliente_destino_db = Cliente.query.filter_by(referenciaPix=referencia_destino).first()
+
+            # Obter cotação para registro histórico
+            try:
+                eth_brl = get_eth_to_brl()
+                if tipo_transferencia == 'saldo_interno':
+                    valor_reais = valor * eth_brl
+                else:
+                    valor_reais = valor_eth * eth_brl
+            except:
+                valor_reais = None
+
+            # Registro de saída para o remetente
+            desc_saida = f"Transferência {tipo_transferencia} para {referencia_destino}"
+            if descricao:
+                desc_saida += f": {descricao}"
+
+            transacao_saida = Transacao(
+                valor_pagamento=valor_reais if valor_reais else (
+                    valor if tipo_transferencia == 'saldo_interno' else valor_eth),
+                descricao=desc_saida,
+                beneficiado=f"Usuário {referencia_destino}",
+                hash_transacao=receipt["transactionHash"].hex(),
+                cliente_id=cliente_origem_db.id,
+                tipo_transacao="SAIDA"
+            )
+            db.session.add(transacao_saida)
+
+            # Registro de entrada para o destinatário (se estiver no sistema)
+            if cliente_destino_db:
+                desc_entrada = f"Recebido {tipo_transferencia} de {referencia_origem}"
+                if descricao:
+                    desc_entrada += f": {descricao}"
+
+                transacao_entrada = Transacao(
+                    valor_pagamento=valor_reais if valor_reais else (
+                        valor if tipo_transferencia == 'saldo_interno' else valor_eth),
+                    descricao=desc_entrada,
+                    beneficiado=f"Usuário {referencia_origem}",
+                    hash_transacao=receipt["transactionHash"].hex(),
+                    cliente_id=cliente_destino_db.id,
+                    tipo_transacao="ENTRADA"
+                )
+                db.session.add(transacao_entrada)
+
+            db.session.commit()
+
+        except Exception as e:
+            print(f"Erro ao registrar no BD: {str(e)}")
+            db.session.rollback()
+
+        # Preparar resposta
+        response = {
+            "sucesso": True,
+            "tipo_transferencia": tipo_transferencia,
+            "transaction_hash": receipt["transactionHash"].hex(),
+            "gas_usado": receipt["gasUsed"],
+            "custo_gas_eth": float(w3.from_wei(receipt["gasUsed"] * w3.eth.gas_price, 'ether')),
+            "origem": {
+                "referencia": referencia_origem,
+                "endereco": endereco_origem,
+            },
+            "destino": {
+                "referencia": referencia_destino,
+                "endereco": endereco_destino,
+            },
+            "descricao": descricao
+        }
+
+        # Adicionar informações específicas por tipo
+        if tipo_transferencia == 'saldo_interno':
+            response["valor"] = valor
+            response["valor_wei"] = int(valor_wei)
+            # Consultar saldos internos atualizados
+            response["origem"]["saldo_interno_eth"] = float(w3.from_wei(
+                etherFlow.functions.consultarSaldoInterno(endereco_origem).call(), 'ether'
+            ))
+            response["destino"]["saldo_interno_eth"] = float(w3.from_wei(
+                etherFlow.functions.consultarSaldoInterno(endereco_destino).call(), 'ether'
+            ))
+        else:
+            response["valor_eth"] = valor_eth
+            response["valor_wei"] = int(valor_wei)
+            # Consultar saldos ETH das wallets
+            response["origem"]["saldo_wallet_eth"] = float(w3.from_wei(
+                w3.eth.get_balance(endereco_origem), 'ether'
+            ))
+            response["destino"]["saldo_wallet_eth"] = float(w3.from_wei(
+                w3.eth.get_balance(endereco_destino), 'ether'
+            ))
+
+        # Adicionar cotação se disponível
+        if valor_reais:
+            response["valor_reais_equivalente"] = round(valor_reais, 2)
+            response["cotacao_eth_brl"] = round(eth_brl, 2)
+
+        return jsonify(response)
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao processar transação: {str(e)}"}), 500
+
 @app.route("/saldoComerciante", methods=["GET"])
 def getMerchantBalance():
     saldo_wei = etherFlow.functions.saldoComerciante(merchantWallet).call()
@@ -839,15 +1082,6 @@ def gerar_qrcodes():
             "comerciante": caminhos['comerciante']
         }
     }
-
-"""
-tx_hash = sistema_cliente.functions.removerCliente("0x5f4728a5c5Fc3359f23cCF08e047B406581BD37a").transact({'from': '0xD367327eECdA3e961f4c849ecfC6Aaf38844920C'})
-w3.eth.wait_for_transaction_receipt(tx_hash)
-print("Cliente removido com sucesso!")
-"""
-
-
-
 
 if __name__ == '__main__':
     with app.app_context():

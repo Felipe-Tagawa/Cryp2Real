@@ -1,6 +1,7 @@
 {
-  "next_index": 4,
+  "next_index": 5,
   "used_accounts": [
-    "0x2f0f2f37afF4CD2559bb8570a0A48e80CACea14B"
+    "0x2f0f2f37afF4CD2559bb8570a0A48e80CACea14B",
+    "0xA7AC60a09b4DA1b1D44CFdBb8fe49eFc05677c41"
   ]
 }
