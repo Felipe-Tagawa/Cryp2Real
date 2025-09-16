@@ -1,24 +1,23 @@
 
 # 🚀 Sistema de Pagamento Blockchain
 
-Um sistema completo de pagamentos descentralizado construído com Ethereum, Flask e Web3.py, permitindo transações seguras entre clientes e comerciantes com suporte a conversão BRL/ETH.
+Um sistema completo de pagamentos descentralizado construído com Ethereum, Flask e Web3.py, permitindo transações seguras entre clientes com suporte a conversão BRL/ETH.
 
 ## ✨ Funcionalidades
 
 ### 🔐 Gestão de Clientes
-- **Registro de usuários** com criação automática de carteiras Ethereum
+- **Registro de usuários** com criação automática de carteiras Ethereum via Ganache
 - **Autenticação segura** com hash de senhas
 - **Gerenciamento de saldo** em ETH com conversão para BRL em tempo real
 - **Referências PIX** para identificação única de usuários
 
 ### 💳 Sistema de Pagamentos
-- **Pagamentos instantâneos** entre clientes e comerciantes
+- **Pagamentos instantâneos** entre clientes ou para ONGs
 - **Conversão automática** BRL → ETH para facilitar transações
-- **Sistema de comissões** configurável para sustentabilidade da plataforma
-- **Doações diretas** para ONGs parceiras
+- **Sistema de comissões** para comerciante, ONGs e clientes
+- **Doações diretas** para ONGs relacionadas
 
 ### 📊 Monitoramento e Controle
-- **Histórico completo** de todas as transações
 - **Consulta de saldos** em tempo real
 - **Sistema de bônus** baseado no volume de transações
 - **Dashboard administrativo** para gerenciamento da plataforma
@@ -31,7 +30,6 @@ Um sistema completo de pagamentos descentralizado construído com Ethereum, Flas
 ├── 🔗 Integração Web3.py
 ├── 💱 Conversão de moedas (BRL/ETH)
 ├── 🔐 Gestão de carteiras
-└── 📡 Endpoints RESTful
 ```
 
 ### Smart Contracts (Solidity)
@@ -39,14 +37,14 @@ Um sistema completo de pagamentos descentralizado construído com Ethereum, Flas
 📂 Contratos Inteligentes
 ├── 👥 SistemaCliente.sol - Gestão de usuários
 ├── 💰 NewEther.sol - Processamento de pagamentos
-└── 🔗 Interface de comunicação entre contratos
+└── 🔗 Interface de comunicação entre contratos inteligentes
 ```
 
 ### Blockchain Infrastructure
 ```
 📂 Infraestrutura
-├── 🌐 Ganache (Desenvolvimento)
-├── 🗄️ MySQL (Dados auxiliares)
+├── 🌐 Ganache (Testes e Atribuição de Contas)
+├── 🗄️ MySQL (Dados de Clientes e de Transações)
 └── 🔗 Web3.py (Integração Python-Ethereum)
 ```
 
@@ -64,7 +62,6 @@ Um sistema completo de pagamentos descentralizado construído com Ethereum, Flas
 ## 📋 Pré-requisitos
 
 - Python 3.8+
-- Node.js 16+
 - MySQL 8.0+
 - Ganache CLI ou GUI
 
@@ -72,8 +69,8 @@ Um sistema completo de pagamentos descentralizado construído com Ethereum, Flas
 
 ### 1. Clone o repositório
 ```bash
-git clone https://github.com/seu-usuario/blockchain-payment-system.git
-cd blockchain-payment-system
+git clone https://github.com/Felipe-Tagawa/Cryp2Real.git
+cd Cryp2Real
 ```
 
 ### 2. Instale as dependências Python
@@ -96,17 +93,27 @@ CREATE DATABASE blockchain_payments;
 ### 5. Inicie o Ganache
 ```bash
 # Via CLI
-ganache-cli --deterministic --accounts 10 --host 0.0.0.0 --port 8545
+ganache-cli --deterministic --accounts 10 --host 0.0.0.0 --port 7545
 
-# Ou use o Ganache GUI
+# Ou use o Ganache GUI - Crie 100 contas com 200 ETH cada(tolerância existente para contas)
 ```
 
-### 6. Deploy dos contratos
+### 6. Baixe o Ngrok e pegue o autenticador
+
+# Instale o Ngrok e autentique com seu token
+ngrok config add-authtoken YOUR_AUTHTOKEN -- Esse AUTHTOKEN é individual
+
+# Inicie um túnel para a porta da aplicação - no nosso caso usaremos a porta 5000
+```ngrok
+ngrok http 5000
+```
+
+### 7. Deploy dos contratos
 ```bash
 python deploy_contract.py
 ```
 
-### 7. Inicie a aplicação
+### 8. Inicie a aplicação
 ```bash
 python app.py
 ```
@@ -163,16 +170,6 @@ Processa pagamento entre cliente e comerciante
 }
 ```
 
-#### `GET /saldoComerciante`
-Consulta saldo do comerciante
-```json
-{
-  "saldo_wei": "2000000000000000000",
-  "saldo_eth": "2.000000",
-  "saldo_reais": "36000.00"
-}
-```
-
 ## 🔒 Segurança
 
 ### Smart Contracts
@@ -185,7 +182,6 @@ Consulta saldo do comerciante
 - **Validação rigorosa** de todos os inputs
 - **Tratamento de erros** abrangente
 - **Logging** de todas as operações sensíveis
-- **Rate limiting** para prevenir spam
 
 ## 🎯 Fluxo de Pagamento
 
@@ -207,29 +203,35 @@ graph TD
 ### Estrutura de Pastas
 ```
 projeto/
-├── app.py                 # Aplicação Flask principal
-├── blockchain.py          # Configurações Web3
-├── utils.py              # Funções utilitárias
-├── deploy_contract.py    # Deploy dos contratos
-├── contracts/
-│   ├── SistemaCliente.sol
-│   └── NewEther.sol
-├── migrations/           # Scripts de migração do BD
-└── tests/               # Testes automatizados
+├── app.py                    # Aplicação Flask principal
+├── my_blockchain.py          # Configurações Web3
+├── utils.py                  # Funções utilitárias
+├── reset_accounts.py         # Realiza o reset de contas
+├── accounts_control.json     # Mostra as contas utilizadas
+├── deploy_contract.py        # Deploy dos contratos
+├── deploy_output             # Saída dos contratos
+├── contracts/                # Smart Contracts
+│   ├── SistemaCliente.sol    # Smart Contract de controle de clientes
+│   └── NewEther.sol          # Smart Contract de controle de transações
+├── DAO/                      # Arquivos de config do banco de dados
+│   ├── clientesDAO.py        # Classe de conexão do usuário com o python
+│   ├── configBD.py           # Classe de configuração do banco de dados local
+│   ├── connectionDAO.py      # Classe de integração com o banco de dados local
+
+Demais arquivos: rodar o projeto na web (futuras atualizações)
 ```
 
 ### Variáveis de Ambiente
 ```env
 # Blockchain
-GANACHE_URL=http://127.0.0.1:8545
-PRIVATE_KEY=0x...
-MERCHANT_ADDRESS=0x...
+GANACHE_URL=http://127.0.0.1:7545
+PRIVATE_KEY= # Private Key da primeira conta do seu ganache
 
 # Database
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
 MYSQL_USER=root
-MYSQL_PASSWORD=password
+MYSQL_PASSWORD=root
 MYSQL_DATABASE=blockchain_payments
 
 # API
@@ -254,6 +256,7 @@ API_BASE_URL=http://localhost:5000
 ---
 
 👥 Equipe de Desenvolvimento
+
 Este projeto foi desenvolvido por:
 
 Felipe Silva Loschi - Integração Blockchain e FlutterFlow
