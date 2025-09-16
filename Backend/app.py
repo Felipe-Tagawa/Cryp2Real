@@ -1,30 +1,22 @@
 import os
+import hashlib
+import traceback
 from datetime import datetime
 from decimal import Decimal, getcontext
 
 from sqlalchemy import text
-from eth_account import Account
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session
 from flask import send_file
-from flask.cli import load_dotenv
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from web3 import Web3
 
-from Backend.deploy_output import sistema_cliente_address, etherFlow_address, sistema_cliente_abi, etherFlow_abi
-from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade
-from Backend.my_blockchain import w3, admWallet, private_key, merchantWallet
+from Backend.utils import sign_n_send, listAllAccounts, get_eth_to_brl, qr_degrade, getGanacheAccount
+from Backend.my_blockchain import w3, PRIVATE_KEY, merchantWallet, etherFlow, sistema_cliente
 from Backend.qr_service import QRCodeService
-
-etherFlow = w3.eth.contract(address=etherFlow_address, abi=etherFlow_abi)
-sistema_cliente = w3.eth.contract(address=sistema_cliente_address, abi=sistema_cliente_abi)
-
-print(merchantWallet)
 
 # listAllAccounts() -- Uso p/ Debug
 
 # Criar um set para inserir as contas:
-contas_usuarios = {}
 
 db = SQLAlchemy()
 
@@ -38,11 +30,12 @@ class Config:
     else:
         # Configuração local
         SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
+        print("Conectado ao Banco Local")
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 def create_app():
-    global w3
+    #global w3
 
     app = Flask(__name__)
     CORS(app)
@@ -70,6 +63,7 @@ def create_app():
     return app
 
 app = create_app()
+app.secret_key = os.urandom(24)
 
 class Cliente(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -78,7 +72,9 @@ class Cliente(db.Model):
     senha = db.Column(db.String(100), nullable=False)
     referenciaPix = db.Column(db.String(100), unique=True, nullable=False)
     carteira = db.Column(db.String(42), nullable=False)
-    # private_key = db.Column(db.Text, nullable=False)
+    saldo_ether = db.Column(db.Float, default=0.0)
+    saldo_reais = db.Column(db.Float, default=0.0)
+    private_key = db.Column(db.Text, nullable=False)
 
     # Relacionamento com transações
     transacoes = db.relationship('Transacao', backref='cliente', lazy=True)
@@ -91,6 +87,7 @@ class Transacao(db.Model):
     beneficiado = db.Column(db.String(100), nullable=False)  # Nome do beneficiado
     data_transacao = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     hash_transacao = db.Column(db.String(66), nullable=False)  # Hash da transação blockchain
+    tipo_transacao = db.Column(db.String(100), nullable=False)  # eth_direto ou sem_taxas
 
     # Chave estrangeira para o cliente
     cliente_id = db.Column(db.Integer, db.ForeignKey('cliente.id'), nullable=False)
@@ -98,6 +95,7 @@ class Transacao(db.Model):
     def __repr__(self):
         return f'<Transacao {self.id}: R${self.valor_pagamento} para {self.beneficiado}>'
 
+""""""
 def converter_reais_para_wei(valor_reais):
     """
     Converte valor em reais para wei automaticamente baseado na cotação atual
@@ -165,7 +163,7 @@ def converter_wei_para_reais(valor_wei):
     except Exception as e:
         raise Exception(f"Erro na conversão automática: {str(e)}")
 
-
+""""""
 
 @app.route('/')
 def run():
@@ -183,151 +181,113 @@ def test_db():
 """""
 
 # Registrar um novo cliente:
+
 @app.route("/registrarCliente", methods=["POST"])
 def registro_cliente():
-    data = request.get_json()
+    try:
+        data = request.get_json()
+        nome = data.get("nome", "").strip()
+        referenciaPix = data.get("referenciaPix", "").strip()
+        email = data.get("email", "").strip()
+        senha = data.get("senha", "").strip()
+        # Insira aqui o saldo do cliente - saldo_eth
+        senhaHash = hashlib.sha256(senha.encode('utf-8')).hexdigest()
 
-    if not data:
-        return jsonify({"erro": "Dados JSON não fornecidos"}), 400
 
-    nome = data.get("nome", "").strip()
-    referenciaPix = data.get("referenciaPix", "").strip()
-    email = data.get("email", "").strip()
-    senha = data.get("senha", "").strip()
+        if not nome or len(nome) < 2:
+            return jsonify({"erro": "Nome deve ter pelo menos 2 caracteres"}), 400
+        if not referenciaPix:
+            return jsonify({"erro": "Referência PIX não pode estar vazia"}), 400
+        if not email:
+            return jsonify({"erro": "Email é obrigatório"}), 400
+        if not senha or len(senha) < 6:
+            return jsonify({"erro": "Senha deve ter pelo menos 6 caracteres"}), 400
 
-    print("Nome:", nome)
-    print("Referencia Pix:", referenciaPix)
-    print("Email:", email)
-    print("Senha:", senha)
 
-    if not nome or len(nome) < 2:
-        return jsonify({"erro": "Nome deve ter pelo menos 2 caracteres"}), 400
+        endereco_existente = sistema_cliente.functions.getEndereco(referenciaPix).call()
+        if endereco_existente != "0x0000000000000000000000000000000000000000":
+            return jsonify({"erro": f"Referência PIX '{referenciaPix}' já está cadastrada no blockchain!"}), 400
 
-    if not referenciaPix:
-        return jsonify({"erro": "Referência PIX não pode estar vazia"}), 400
 
-    if not email:
-        return jsonify({"erro": "Email é obrigatório"}), 400
+        existing_client = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
+        if existing_client:
+            return jsonify({"erro": f"Referência PIX '{referenciaPix}' já está cadastrada no banco!"}), 400
 
-    if not senha or len(senha) < 6:
-        return jsonify({"erro": "Senha deve ter pelo menos 6 caracteres"}), 400
 
-    # Criar nova conta para o usuário
-    nova_conta = Account.create()  # Esse method cria uma conta com um endereço aleatório(sem relação com o Ganache)
-    carteiraUsuario = nova_conta.address
-    private_key_user = nova_conta.key.hex()
-
-    # Salvando a conta por referenciaPix (IMPORTANTE: uso na realizaPagamento p/ busca de qual cliente irá fazer a transferência)
-    contas_usuarios[referenciaPix] = {
-        'address': carteiraUsuario,
-        'private_key': private_key_user,
-        'email': email
-    }
-
-    # Transferir alguns ETH para a nova conta
-    transfer_nonce = w3.eth.get_transaction_count(admWallet)
-    transfer_tx = {
-        'to': carteiraUsuario,
-        'value': w3.to_wei(0.1, 'ether'),
-        'gas': 21000,
-        'gasPrice': w3.eth.gas_price,
-        'nonce': transfer_nonce,
-        'chainId': w3.eth.chain_id
-    }
-
-    signed_transfer = w3.eth.account.sign_transaction(transfer_tx, private_key)
-    w3.eth.send_raw_transaction(signed_transfer.raw_transaction)
-
-    nonce = w3.eth.get_transaction_count(carteiraUsuario)
-
-    transaction = sistema_cliente.functions.registrarCliente(
-        nome, referenciaPix, email, senha
-    ).build_transaction(
-        {
+        userAddress, privateKeyUser = getGanacheAccount()
+        transaction = sistema_cliente.functions.registrarCliente(
+            nome, referenciaPix, email, senha
+            ).build_transaction({
             "gasPrice": w3.eth.gas_price,
             "chainId": w3.eth.chain_id,
-            "from": carteiraUsuario,
-            "nonce": nonce,
-        }
-    )
+            "from": userAddress,
+            "nonce": w3.eth.get_transaction_count(userAddress),
+            "gas": 500000,
+            })
+        receipt = sign_n_send(transaction, privateKeyUser)
 
-    receipt = sign_n_send(transaction, private_key_user)
 
-    # Adiciona saldo de R$10
-    cotacao = get_eth_to_brl()
-    valor_eth = 10.0 / cotacao
-    valor_wei = w3.to_wei(valor_eth, 'ether')
+        newClient = Cliente(
+            nome=nome,
+            referenciaPix=referenciaPix,
+            email=email,
+            senha=senhaHash,
+            carteira=userAddress,
+            saldo_ether=float(w3.from_wei(w3.eth.get_balance(userAddress), 'ether')),
+            private_key=privateKeyUser
+        )
 
-    bonus_nonce = w3.eth.get_transaction_count(admWallet)
-    bonus_tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
-        "from": admWallet,
-        "nonce": bonus_nonce,
-        "gas": 300000,
-        "gasPrice": w3.eth.gas_price,
-        "chainId": w3.eth.chain_id
-    })
+        db.session.add(newClient)
+        db.session.commit()
 
-    bonus_receipt = sign_n_send(bonus_tx, private_key)
+        # Salva na sessão para já estar logado
+        #session['cliente_id'] = newClient.id
+        session['email'] = newClient.email
+        session['carteira'] = newClient.carteira
 
-    novoCliente = Cliente(nome=nome,
-                          referenciaPix=referenciaPix,
-                          email=email,
-                          senha=senha,
-                          carteira=carteiraUsuario)
-                          # private_key=private_key_user)
-
-    db.session.add(novoCliente)
-    db.session.commit()
-
-    return jsonify({
-        "status": "Usuário registrado com sucesso e saldo de R$10,00 adicionado!",
-        "carteira": carteiraUsuario,
-        "tx_registro": receipt["transactionHash"].hex(),
-        "tx_bonus": bonus_receipt["transactionHash"].hex()
-    })
+        return jsonify({
+            "status": "Usuário registrado com sucesso!",
+            "carteira": userAddress,
+            "saldo_inicial": f"{w3.from_wei(w3.eth.get_balance(userAddress), 'ether')} ETH",
+            "tx_registro": receipt["transactionHash"].hex(),
+            "referenciaPix": referenciaPix,
+            "nome": nome,
+            "email": email
+            }), 200
+    except Exception as e:
+        db.session.rollback()
+        print("❌ Erro em /registrarCliente:", str(e))
+        traceback.print_exc()
+        return jsonify({"erro": f"Erro ao registrar cliente: {str(e)}"}), 500
 
 
 # Login de usuário:
 @app.route("/loginClient", methods=["POST"])
 def loginCliente():
     data = request.get_json()
-    print("JSON parseado:", data)
-
     email = data.get("email", "").strip()
     senha = data.get("senha", "").strip()
-
     if not email or not senha:
         return jsonify({"erro": "Email e senha são obrigatórios!"}), 400
-
     try:
-        # Chamada ao contrato para autenticar cliente
         autenticado, carteira = sistema_cliente.functions.autenticarCliente(email, senha).call()
-
         if not autenticado:
             return jsonify({"erro": "Credenciais inválidas!"}), 401
-
         carteira_checksum = w3.to_checksum_address(carteira)
-
-        # Verifica se o cliente está registrado localmente (ou seja, foi registrado no dicionário `contas_usuarios`)
-        cliente_info = None
-        for referenciaPix, info in contas_usuarios.items():
-            if info['email'] == email and w3.to_checksum_address(info['address']) == carteira_checksum:
-                cliente_info = info
-                break
-
-        if not cliente_info:
-            return jsonify({"erro": "Endereço da carteira não corresponde ou cliente não está registrado localmente"}), 401
-
+        cliente = Cliente.query.filter_by(email=email).first()
+        if not cliente:
+            return jsonify({"erro": "Cliente não encontrado no banco"}), 404
+        if w3.to_checksum_address(cliente.carteira) != carteira_checksum:
+            return jsonify({"erro": "Carteira no banco não confere com a blockchain"}), 400
         return jsonify({
-            "status": "Login bem-sucedido!",
-            "carteira": carteira_checksum,
-            "email": email
+        "status": "Login bem-sucedido!",
+        "carteira": carteira_checksum,
+        "email": cliente.email,
+        "nome": cliente.nome,
+        "referenciaPix": cliente.referenciaPix
         })
-
     except Exception as e:
-        print("Erro ao autenticar:", str(e))
         return jsonify({"erro": f"Erro interno ao tentar login: {str(e)}"}), 500
-
 
 """ debug
 # Mostra as infos do cliente:
@@ -386,61 +346,72 @@ def mostraInfoCliente():
         
 """
 
-""" Usar o AppState
-@app.route("/adicionaSaldo", methods=["POST"])
-def adicionaSaldo():
+
+@app.route("/getBalance", methods=["GET"])
+def getBalance():
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"erro": "Dados JSON não fornecidos"}), 400
+        # Inicializar variáveis
+        saldo_interno_wei = None
+        saldo_interno_eth = None
 
-        referenciaPix = data.get("referenciaPix")
-        valor_reais = data.get("valor_reais")
+        referencia_pix = request.args.get('referenciaPix')
 
-        if not referenciaPix:
-            return jsonify({"erro": "Referencia Pix não fornecida"}), 400
+        if referencia_pix:
+            cliente = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
+            if not cliente:
+                return jsonify({"erro": "Cliente não encontrado"}), 404
+        else:
+            cliente_id = session.get("cliente_id")
+            if not cliente_id:
+                return jsonify({"erro": "referenciaPix obrigatória na query string ou sessão válida"}), 400
+            cliente = Cliente.query.get(cliente_id)
+            if not cliente:
+                return jsonify({"erro": "Cliente da sessão não encontrado"}), 404
 
+        address = w3.to_checksum_address(cliente.carteira)
+
+        # Saldo real da carteira ETH
+        saldo_wei = w3.eth.get_balance(address)
+        saldo_eth = w3.from_wei(saldo_wei, "ether")
+
+        # Saldo interno no contrato
         try:
-            valor_reais = float(valor_reais)
-            if valor_reais <= 0:
-                return jsonify({"erro": "Valor deve ser maior que zero"}), 400
-        except (ValueError, TypeError):
-            return jsonify({"erro": "Valor inválido. Deve ser um número positivo."}), 400
-
-        try:
-            cotacao = get_eth_to_brl()
+            saldo_interno_wei = etherFlow.functions.saldoCliente(address).call()
+            saldo_interno_eth = w3.from_wei(saldo_interno_wei, "ether")
         except Exception as e:
-            return jsonify({"erro": f"Erro ao buscar cotação: {str(e)}"}), 500
+            print(f"Erro ao buscar saldo interno: {e}")
+            saldo_interno_wei = None
+            saldo_interno_eth = None
 
-        valor_eth = valor_reais / cotacao
-        valor_wei = w3.to_wei(valor_eth, 'ether')
+        # CONVERSÃO SIMPLIFICADA: 1 ETH = 1 BRL
+        cotacao_eth_brl = 1.0
 
-        nonce = w3.eth.get_transaction_count(admWallet)
-        tx = sistema_cliente.functions.adicionarSaldo(referenciaPix, valor_wei).build_transaction({
-            "from": admWallet,
-            "nonce": nonce,
-            "gas": 300000,
-            "gasPrice": w3.eth.gas_price,
-            "chainId": w3.eth.chain_id
-        })
-
-        receipt = sign_n_send(tx, private_key)
+        saldo_brl = float(saldo_eth) * cotacao_eth_brl  # Sempre 1:1
+        saldo_interno_brl = float(saldo_interno_eth) * cotacao_eth_brl if saldo_interno_eth else None
 
         return jsonify({
-            "status": "Saldo adicionado com sucesso!",
-            "tx_hash": receipt["transactionHash"].hex(),
-            "valor_reais": valor_reais,
-            "valor_eth": valor_eth,
-            "valor_wei": valor_wei,
-            "cotacao_eth_brl": cotacao
-        })
+            "status": "sucesso",
+            "cliente_id": cliente.id,
+            "nome": cliente.nome,
+            "email": cliente.email,
+            "referenciaPix": cliente.referenciaPix,
+            "carteira": address,
+
+            # Saldos principais (agora iguais!)
+            "balance_eth": float(saldo_eth),
+            "balance_brl": round(saldo_brl, 2),
+            "balance_interno_eth": float(saldo_interno_eth) if saldo_interno_eth else None,
+            "balance_interno_brl": round(saldo_interno_brl, 2) if saldo_interno_brl else None,
+
+            # Info do sistema
+            "cotacao_eth_brl": cotacao_eth_brl,  # Sempre 1.0
+            "fonte_dados": "ganache_blockchain + etherFlow (1ETH = 1BRL)",
+            "timestamp": datetime.utcnow().isoformat()
+        }), 200
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
-        
-"""
+        return jsonify({"erro": f"Erro interno ao buscar saldo: {str(e)}"}), 500
+
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():
@@ -502,11 +473,11 @@ def realizaPagamento():
         "value": int(valor_wei)
     })
 
-    cliente_info = contas_usuarios.get(referenciaPix)
-    if not cliente_info:
-        return jsonify({"erro": "Cliente não encontrado no servidor"}), 400
+    cliente_db = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
+    if not cliente_db:
+        return jsonify({"erro": "Cliente não encontrado no banco de dados"}), 400
+    private_key_cliente = cliente_db.private_key
 
-    private_key_cliente = cliente_info['private_key']
     receipt = sign_n_send(new_transaction, private_key_cliente)
 
     # REGISTRAR A TRANSAÇÃO NO BANCO DE DADOS
@@ -520,7 +491,7 @@ def realizaPagamento():
         nova_transacao = Transacao(
             valor_pagamento=valor_reais,
             descricao=descricao if descricao else None,
-            beneficiado="Comerciante",  # Por enquanto é constante
+            beneficiado="Comerciante",
             hash_transacao=receipt["transactionHash"].hex(),
             cliente_id=clientes.id
         )
@@ -549,9 +520,9 @@ def realizaPagamento():
 
 getcontext().prec = 18  # Define precisão alta
 
-@app.route("/transferirParaCliente", methods=["POST"])
+""" @app.route("/transferirParaCliente", methods=["POST"])
 def transferirParaCliente():
-    """Realiza transferência entre clientes usando referência PIX"""
+    # Realiza transferência entre clientes usando referência PIX
     data = request.get_json()
     if not data:
         return jsonify({"erro": "Dados JSON não fornecidos"}), 400
@@ -589,6 +560,9 @@ def transferirParaCliente():
 
         if endereco_destino == "0x0000000000000000000000000000000000000000":
             return jsonify({"erro": "Cliente destinatário não encontrado"}), 400
+
+        if endereco_origem == endereco_destino:
+            return jsonify({"erro": "Cliente destinastário não pode ser igual ao remetente"}), 400
 
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar clientes: {str(e)}"}), 500
@@ -684,6 +658,258 @@ def transferirParaCliente():
 
     except Exception as e:
         return jsonify({"erro": f"Erro ao executar transferência: {str(e)}"}), 500
+"""
+
+
+@app.route("/transferirEntreUsers", methods=["POST"])
+def transferirEntreUsers():
+    data = request.get_json()
+    if not data:
+        return jsonify({"erro": "Dados JSON não fornecidos"}), 400
+
+    # Validar campos obrigatórios
+    required_fields = ['referencia_origem', 'referencia_destino', 'tipo_transferencia']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"erro": f"Campo '{field}' é obrigatório"}), 400
+
+    referencia_origem = data['referencia_origem']
+    referencia_destino = data['referencia_destino']
+    tipo_transferencia = data['tipo_transferencia']  # 'saldo_interno', 'eth_direto', 'sem_taxas'
+    descricao = data.get('descricao', '')
+
+    # Verificar auto-transferência
+    if referencia_origem == referencia_destino:
+        return jsonify({"erro": "Não é possível transferir para si mesmo"}), 400
+
+    # Buscar endereços
+    endereco_origem = sistema_cliente.functions.getEnderecoPorPix(referencia_origem).call()
+    endereco_destino = sistema_cliente.functions.getEnderecoPorPix(referencia_destino).call()
+
+    if not w3.is_address(endereco_origem) or endereco_origem == "0x0000000000000000000000000000000000000000":
+        return jsonify({"erro": "Usuário de origem não registrado"}), 400
+
+    if not w3.is_address(endereco_destino) or endereco_destino == "0x0000000000000000000000000000000000000000":
+        return jsonify({"erro": "Usuário de destino não registrado"}), 400
+
+    # Buscar dados do cliente origem
+    cliente_origem = Cliente.query.filter_by(referenciaPix=referencia_origem).first()
+    if not cliente_origem:
+        return jsonify({"erro": "Cliente origem não encontrado no banco de dados"}), 400
+
+    private_key_origem = cliente_origem.private_key
+    nonce = w3.eth.get_transaction_count(endereco_origem)
+
+    try:
+        # OPÇÃO 1: Transferência usando saldo interno do contrato
+        if tipo_transferencia == 'saldo_interno':
+            if 'valor' not in data:
+                return jsonify({"erro": "Campo 'valor' é obrigatório para transferência por saldo interno"}), 400
+
+            valor = float(data['valor'])
+            valor_wei = w3.to_wei(valor, 'ether')
+
+            # Verificar saldo interno
+            saldo_interno = etherFlow.functions.consultarSaldoInterno(endereco_origem).call()
+            if saldo_interno < valor_wei:
+                return jsonify({
+                    "erro": "Saldo interno insuficiente",
+                    "saldo_interno_eth": float(w3.from_wei(saldo_interno, 'ether')),
+                    "valor_solicitado": valor
+                }), 400
+
+            transaction = etherFlow.functions.transferirParaUsuario(
+                valor_wei,
+                referencia_origem,  # Usar como referência da transação
+                endereco_destino
+            ).build_transaction({
+                "from": endereco_origem,
+                "nonce": nonce,
+                "gasPrice": w3.eth.gas_price,
+            })
+
+        # OPÇÃO 2: Transferência ETH direto com taxas
+        elif tipo_transferencia == 'eth_direto':
+            if 'valor_eth' not in data:
+                return jsonify({"erro": "Campo 'valor_eth' é obrigatório para transferência ETH direto"}), 400
+
+            valor_eth = float(data['valor_eth'])
+            valor_wei = w3.to_wei(valor_eth, 'ether')
+
+            # Verificar saldo ETH
+            saldo_eth = w3.eth.get_balance(endereco_origem)
+            gas_estimate = etherFlow.functions.transferirETHDireto(
+                referencia_origem, endereco_destino
+            ).estimate_gas({"from": endereco_origem, "value": valor_wei})
+
+            gas_cost = gas_estimate * w3.eth.gas_price
+            total_necessario = valor_wei + gas_cost
+
+            if saldo_eth < total_necessario:
+                return jsonify({
+                    "erro": "Saldo ETH insuficiente",
+                    "saldo_atual_eth": float(w3.from_wei(saldo_eth, 'ether')),
+                    "valor_transferencia": valor_eth,
+                    "gas_estimado_eth": float(w3.from_wei(gas_cost, 'ether')),
+                    "total_necessario_eth": float(w3.from_wei(total_necessario, 'ether'))
+                }), 400
+
+            transaction = etherFlow.functions.transferirETHDireto(
+                referencia_origem,
+                endereco_destino
+            ).build_transaction({
+                "from": endereco_origem,
+                "nonce": nonce,
+                "gasPrice": w3.eth.gas_price,
+                "value": valor_wei
+            })
+
+        # OPÇÃO 3: Transferência sem taxas (P2P puro)
+        elif tipo_transferencia == 'sem_taxas':
+            if 'valor_eth' not in data:
+                return jsonify({"erro": "Campo 'valor_eth' é obrigatório para transferência sem taxas"}), 400
+
+            valor_eth = float(data['valor_eth'])
+            valor_wei = w3.to_wei(valor_eth, 'ether')
+
+            # Verificar saldo ETH
+            saldo_eth = w3.eth.get_balance(endereco_origem)
+            gas_estimate = etherFlow.functions.transferenciaSemTaxas(
+                referencia_origem, endereco_destino
+            ).estimate_gas({"from": endereco_origem, "value": valor_wei})
+
+            gas_cost = gas_estimate * w3.eth.gas_price
+            total_necessario = valor_wei + gas_cost
+
+            if saldo_eth < total_necessario:
+                return jsonify({
+                    "erro": "Saldo ETH insuficiente",
+                    "saldo_atual_eth": float(w3.from_wei(saldo_eth, 'ether')),
+                    "valor_transferencia": valor_eth,
+                    "gas_estimado_eth": float(w3.from_wei(gas_cost, 'ether')),
+                    "total_necessario_eth": float(w3.from_wei(total_necessario, 'ether'))
+                }), 400
+
+            transaction = etherFlow.functions.transferenciaSemTaxas(
+                referencia_origem,
+                endereco_destino
+            ).build_transaction({
+                "from": endereco_origem,
+                "nonce": nonce,
+                "gasPrice": w3.eth.gas_price,
+                "value": valor_wei
+            })
+
+        else:
+            return jsonify(
+                {"erro": "Tipo de transferência inválido. Use: 'saldo_interno', 'eth_direto', ou 'sem_taxas'"}), 400
+
+        # Assinar e enviar transação
+        receipt = sign_n_send(transaction, private_key_origem)
+
+        # Registrar no banco de dados
+        try:
+            cliente_origem_db = Cliente.query.filter_by(referenciaPix=referencia_origem).first()
+            cliente_destino_db = Cliente.query.filter_by(referenciaPix=referencia_destino).first()
+
+            # Obter cotação para registro histórico
+            try:
+                eth_brl = get_eth_to_brl()
+                if tipo_transferencia == 'saldo_interno':
+                    valor_reais = valor * eth_brl
+                else:
+                    valor_reais = valor_eth * eth_brl
+            except:
+                valor_reais = None
+
+            # Registro de saída para o remetente
+            desc_saida = f"Transferência {tipo_transferencia} para {referencia_destino}"
+            if descricao:
+                desc_saida += f": {descricao}"
+
+            transacao_saida = Transacao(
+                valor_pagamento=valor_reais if valor_reais else (
+                    valor if tipo_transferencia == 'saldo_interno' else valor_eth),
+                descricao=desc_saida,
+                beneficiado=f"Usuário {referencia_destino}",
+                hash_transacao=receipt["transactionHash"].hex(),
+                cliente_id=cliente_origem_db.id,
+                tipo_transacao="SAIDA"
+            )
+            db.session.add(transacao_saida)
+
+            # Registro de entrada para o destinatário (se estiver no sistema)
+            if cliente_destino_db:
+                desc_entrada = f"Recebido {tipo_transferencia} de {referencia_origem}"
+                if descricao:
+                    desc_entrada += f": {descricao}"
+
+                transacao_entrada = Transacao(
+                    valor_pagamento=valor_reais if valor_reais else (
+                        valor if tipo_transferencia == 'saldo_interno' else valor_eth),
+                    descricao=desc_entrada,
+                    beneficiado=f"Usuário {referencia_origem}",
+                    hash_transacao=receipt["transactionHash"].hex(),
+                    cliente_id=cliente_destino_db.id,
+                    tipo_transacao="ENTRADA"
+                )
+                db.session.add(transacao_entrada)
+
+            db.session.commit()
+
+        except Exception as e:
+            print(f"Erro ao registrar no BD: {str(e)}")
+            db.session.rollback()
+
+        # Preparar resposta
+        response = {
+            "sucesso": True,
+            "tipo_transferencia": tipo_transferencia,
+            "transaction_hash": receipt["transactionHash"].hex(),
+            "gas_usado": receipt["gasUsed"],
+            "custo_gas_eth": float(w3.from_wei(receipt["gasUsed"] * w3.eth.gas_price, 'ether')),
+            "origem": {
+                "referencia": referencia_origem,
+                "endereco": endereco_origem,
+            },
+            "destino": {
+                "referencia": referencia_destino,
+                "endereco": endereco_destino,
+            },
+            "descricao": descricao
+        }
+
+        # Adicionar informações específicas por tipo
+        if tipo_transferencia == 'saldo_interno':
+            response["valor"] = valor
+            response["valor_wei"] = int(valor_wei)
+            # Consultar saldos internos atualizados
+            response["origem"]["saldo_interno_eth"] = float(w3.from_wei(
+                etherFlow.functions.consultarSaldoInterno(endereco_origem).call(), 'ether'
+            ))
+            response["destino"]["saldo_interno_eth"] = float(w3.from_wei(
+                etherFlow.functions.consultarSaldoInterno(endereco_destino).call(), 'ether'
+            ))
+        else:
+            response["valor_eth"] = valor_eth
+            response["valor_wei"] = int(valor_wei)
+            # Consultar saldos ETH das wallets
+            response["origem"]["saldo_wallet_eth"] = float(w3.from_wei(
+                w3.eth.get_balance(endereco_origem), 'ether'
+            ))
+            response["destino"]["saldo_wallet_eth"] = float(w3.from_wei(
+                w3.eth.get_balance(endereco_destino), 'ether'
+            ))
+
+        # Adicionar cotação se disponível
+        if valor_reais:
+            response["valor_reais_equivalente"] = round(valor_reais, 2)
+            response["cotacao_eth_brl"] = round(eth_brl, 2)
+
+        return jsonify(response)
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao processar transação: {str(e)}"}), 500
 
 @app.route("/saldoComerciante", methods=["GET"])
 def getMerchantBalance():
@@ -764,9 +990,11 @@ def donate():
         if not w3.is_address(endereco_cliente) or endereco_cliente == w3.to_checksum_address("0x0000000000000000000000000000000000000000"):
             return jsonify({"erro": "Cliente não registrado com essa referência Pix"}), 400
 
-        cliente_info = contas_usuarios.get(referencia_pix)
-        if not cliente_info:
-            return jsonify({"erro": "Cliente não encontrado no servidor"}), 400
+        cliente_db = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
+        if not cliente_db:
+            return jsonify({"erro": "Cliente não encontrado no banco de dados"}), 400
+
+        private_key_cliente = cliente_db.private_key
 
         # Conversão BRL → ETH → WEI
         cotacao = get_eth_to_brl()
@@ -785,7 +1013,7 @@ def donate():
         })
 
         # Assinar e enviar
-        signed_tx = sign_n_send(tx, cliente_info['private_key'])
+        signed_tx = sign_n_send(tx, private_key_cliente)
 
         # Registrar no banco
         try:
