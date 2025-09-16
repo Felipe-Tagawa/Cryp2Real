@@ -100,10 +100,10 @@ ganache-cli --deterministic --accounts 10 --host 0.0.0.0 --port 7545
 
 ### 6. Baixe o Ngrok e pegue o autenticador
 
-# Instale o Ngrok e autentique com seu token
+### Instale o Ngrok e autentique com seu token
 ngrok config add-authtoken YOUR_AUTHTOKEN -- Esse AUTHTOKEN é individual
 
-# Inicie um túnel para a porta da aplicação - no nosso caso usaremos a porta 5000
+### Inicie um túnel para a porta da aplicação - no nosso caso usaremos a porta 5000
 ```ngrok
 ngrok http 5000
 ```
