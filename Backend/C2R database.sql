@@ -4,25 +4,27 @@ DROP DATABASE IF EXISTS sistema_blockchain_cliente;
 CREATE DATABASE IF NOT EXISTS sistema_blockchain_cliente;
 USE sistema_blockchain_cliente;
 
-    -- Tabela de Clientes
-    CREATE TABLE cliente (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        nome VARCHAR(255) NOT NULL,
-        email VARCHAR(255) NOT NULL UNIQUE,
-        referencia_pix VARCHAR(255) NOT NULL UNIQUE,
-        senha_hash VARCHAR(255) NOT NULL,
-        carteira_endereco VARCHAR(42) NOT NULL UNIQUE, -- Endereço Ethereum (42 chars com 0x)
-        saldo_wei DECIMAL(65, 0) DEFAULT 0, -- Wei (máximo suportado pelo MySQL)
-        saldo_ether DECIMAL(20, 8) DEFAULT 0.00000000,
-        saldo_reais DECIMAL(15, 2) DEFAULT 0.00,
-        registrado BOOLEAN DEFAULT TRUE,
-        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        ativo BOOLEAN DEFAULT TRUE,
-        INDEX idx_carteira (carteira_endereco),
-        INDEX idx_pix (referencia_pix),
-        INDEX idx_email (email)
-    );
+-- Tabela de Clientes
+CREATE TABLE cliente (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    nome VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    referenciaPix VARCHAR(255) NOT NULL UNIQUE,
+    senha VARCHAR(255) NOT NULL,
+    carteira VARCHAR(42) NOT NULL UNIQUE, -- Endereço Ethereum (42 chars com 0x)
+    private_key TEXT NOT NULL,
+
+    -- saldo_wei DECIMAL(65, 0) DEFAULT 0, -- Wei (máximo suportado pelo MySQL)
+    saldo_ether DECIMAL(20, 8) DEFAULT 0.00000000,
+    saldo_reais DECIMAL(15, 2) DEFAULT 0.00,
+    registrado BOOLEAN DEFAULT TRUE,
+    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    ativo BOOLEAN DEFAULT TRUE,
+    INDEX idx_carteira (carteira),
+    INDEX idx_pix (referenciaPix),
+    INDEX idx_email (email)
+);
 
 CREATE TABLE IF NOT EXISTS transacao (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -31,6 +33,7 @@ CREATE TABLE IF NOT EXISTS transacao (
     beneficiado VARCHAR(100) NOT NULL COMMENT 'Nome do beneficiado do pagamento',
     data_transacao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora da transação',
     hash_transacao VARCHAR(66) NOT NULL COMMENT 'Hash da transação na blockchain',
+    tipo_transacao VARCHAR(100) NOT NULL COMMENT 'eth_direto ou sem_taxas',
     cliente_id INT NOT NULL COMMENT 'ID do cliente que realizou a transação',
 
     -- Índices para melhor performance
@@ -41,7 +44,7 @@ CREATE TABLE IF NOT EXISTS transacao (
     -- Chave estrangeira
     CONSTRAINT fk_transacao_cliente
         FOREIGN KEY (cliente_id)
-        REFERENCES cliente(id)
+        REFERENCES cliente (id)
         ON DELETE CASCADE
         ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Tabela de transações PIX dos clientes';
@@ -103,7 +106,7 @@ CREATE TABLE transacoes (
     nonce_transacao INT,
     data_transacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     observacoes TEXT,
-    FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,
+    FOREIGN KEY (cliente_id) REFERENCES cliente(id) ON DELETE SET NULL,
     FOREIGN KEY (comerciante_id) REFERENCES comerciantes(id) ON DELETE SET NULL,
     FOREIGN KEY (ong_id) REFERENCES ongs(id) ON DELETE SET NULL,
     INDEX idx_hash (hash_transacao),
@@ -164,14 +167,14 @@ CREATE TABLE sessoes_usuario (
     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     data_expiracao TIMESTAMP NOT NULL,
     ativa BOOLEAN DEFAULT TRUE,
-    FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+    FOREIGN KEY (cliente_id) REFERENCES cliente(id) ON DELETE CASCADE,
     INDEX idx_token (token_sessao),
     INDEX idx_cliente_sessao (cliente_id),
     INDEX idx_expiracao (data_expiracao)
 );
 
 -- Inserção de dados iniciais
-INSERT INTO configuracoes_sistema (chave, valor, descricao) VALUES 
+INSERT INTO configuracoes_sistema (chave, valor, descricao) VALUES
 ('cotacao_eth_brl_padrao', '18000', 'Cotação padrão ETH para BRL quando não há cotação atual'),
 ('taxa_ong_percentual', '5', 'Percentual da taxa destinada à ONG (em %)'),
 ('endereco_ong_atual', '0xC1009cB7c88bF71BcF562Dc105aEfa18459184B7', 'Endereço atual da ONG no blockchain'),
@@ -179,17 +182,17 @@ INSERT INTO configuracoes_sistema (chave, valor, descricao) VALUES
 ('gas_price_gwei', '20', 'Preço do gas em Gwei');
 
 -- Inserção da ONG padrão
-INSERT INTO ongs (nome, endereco_carteira, descricao) VALUES 
+INSERT INTO ongs (nome, endereco_carteira, descricao) VALUES
 ('ONG Padrão do Sistema', '0xC1009cB7c88bF71BcF562Dc105aEfa18459184B7', 'ONG padrão configurada no sistema para receber taxas');
 
 -- Views úteis para consultas
 CREATE VIEW vw_transacoes_completas AS
-SELECT 
+SELECT
     t.id,
     t.hash_transacao,
     t.tipo_transacao,
     c.nome AS nome_cliente,
-    c.referencia_pix,
+    c.referenciaPix,
     com.nome AS nome_comerciante,
     o.nome AS nome_ong,
     t.valor_ether,
@@ -197,26 +200,26 @@ SELECT
     t.status_transacao,
     t.data_transacao
 FROM transacoes t
-LEFT JOIN clientes c ON t.cliente_id = c.id
+LEFT JOIN cliente c ON t.cliente_id = c.id
 LEFT JOIN comerciantes com ON t.comerciante_id = com.id
 LEFT JOIN ongs o ON t.ong_id = o.id;
 
 CREATE VIEW vw_saldos_resumo AS
-SELECT 
+SELECT
     'CLIENTES' AS tipo,
     COUNT(*) AS quantidade,
     SUM(saldo_ether) AS total_ether,
     SUM(saldo_reais) AS total_reais
-FROM clientes WHERE ativo = TRUE
+FROM cliente WHERE ativo = TRUE
 UNION ALL
-SELECT 
+SELECT
     'COMERCIANTES' AS tipo,
     COUNT(*) AS quantidade,
     SUM(saldo_ether) AS total_ether,
     SUM(saldo_reais) AS total_reais
 FROM comerciantes WHERE ativo = TRUE
 UNION ALL
-SELECT 
+SELECT
     'ONGS' AS tipo,
     COUNT(*) AS quantidade,
     SUM(saldo_ether) AS total_ether,
