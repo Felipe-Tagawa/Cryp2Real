@@ -211,9 +211,12 @@ contract SistemaCliente {
         return clientes[cliente].registrado;
     }
 
-    function getNomeCliente(address cliente) public view returns (string memory) {
-        return clientes[cliente].nome;
+    function getNomeCliente(string memory referenciaPix) public view returns (string memory) {
+        address cliente = pixCliente[referenciaPix];                         // pega o endereço pelo PIX
+        require(cliente != address(0), "Cliente nao encontrado para esse referenciaPix");
+        return clientes[cliente].nome;                                       // retorna o nome
     }
+
 
     function getEmailCliente(address cliente) public view returns (string memory) {
         return clientes[cliente].email;
