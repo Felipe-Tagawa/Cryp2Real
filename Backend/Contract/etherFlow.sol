@@ -418,6 +418,13 @@ contract etherFlow {
         return (valorComissao, valorOng);
     }
 
+    // Função para configurar ou alterar a ONG
+    function setContaOng(address _contaOng) external onlyDono {
+        require(_contaOng != address(0), "Endereco da ONG invalido");
+        contaOng = _contaOng;
+        emit mudarContaOng(_contaOng);
+    }
+
     function doacaoDireta() public payable noReentrance apenasClienteRegistrado {
         require(msg.value > 0, "Voce deve enviar um valor maior do que zero");
         require(contaOng != address(0), "Conta da ONG nao configurada");

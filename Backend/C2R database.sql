@@ -225,3 +225,5 @@ SELECT
     SUM(saldo_ether) AS total_ether,
     SUM(saldo_reais) AS total_reais
 FROM ongs WHERE ativa = TRUE;
+
+select * from transacoes;

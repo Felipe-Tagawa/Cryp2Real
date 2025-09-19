@@ -1,14 +1,16 @@
 import hashlib
+import io
 import os
 import secrets
 import traceback
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, request, session, Response
 from flask import send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+from matplotlib import pyplot as plt
 from sqlalchemy import text
 
 from Backend.my_blockchain import w3, etherFlow, sistema_cliente
@@ -128,7 +130,7 @@ def registro_cliente():
             return jsonify({"erro": "Senha deve ter pelo menos 2 caracteres"}), 400
 
 
-        endereco_existente = sistema_cliente.functions.getEndereco(referenciaPix).call()
+        endereco_existente = sistema_cliente.functions.getEnderecoPorPix(referenciaPix).call()
         if endereco_existente != "0x0000000000000000000000000000000000000000":
             return jsonify({"erro": f"Referência PIX '{referenciaPix}' já está cadastrada no blockchain!"}), 400
 
@@ -202,72 +204,58 @@ def loginCliente():
             return jsonify({"erro": "Cliente não encontrado no banco"}), 404
         if w3.to_checksum_address(cliente.carteira) != carteira_checksum:
             return jsonify({"erro": "Carteira no banco não confere com a blockchain"}), 400
+
+        # 🔹 Salvar na sessão
+        session['cliente_id'] = cliente.id
+        session['email'] = cliente.email
+        session['carteira'] = cliente.carteira
+
         return jsonify({
-        "status": "Login bem-sucedido!",
-        "carteira": carteira_checksum,
-        "email": cliente.email,
-        "nome": cliente.nome,
-        "referenciaPix": cliente.referenciaPix
+            "status": "Login bem-sucedido!",
+            "carteira": carteira_checksum,
+            "email": cliente.email,
+            "nome": cliente.nome,
+            "referenciaPix": cliente.referenciaPix
         })
     except Exception as e:
         return jsonify({"erro": f"Erro interno ao tentar login: {str(e)}"}), 500
 
-""" debug
+
 # Mostra as infos do cliente:
 @app.route("/mostraInfoCliente", methods=["GET"])
 def mostraInfoCliente():
-    address = request.args.get("carteira")
+    referencia_pix = request.args.get("referenciaPix")
 
-    if not address:
-        return jsonify({"erro": "Parâmetro 'carteira' é obrigatório!"}), 400
+    if not referencia_pix:
+        return jsonify({"erro": "Parâmetro 'referenciaPix' é obrigatório!"}), 400
 
-    if not address.strip():
-        return jsonify({"erro": "Endereço da carteira não pode estar vazio!"}), 400
+    if not referencia_pix.strip():
+        return jsonify({"erro": "referenciaPix não pode estar vazio!"}), 400
 
     try:
-        endereco = w3.to_checksum_address(address)
+        # Buscar o endereço associado à referência Pix
+        endereco = sistema_cliente.functions.getEnderecoPorPix(referencia_pix).call()
+
+        if not w3.is_address(endereco) or endereco == "0x0000000000000000000000000000000000000000":
+            return jsonify({"erro": "Nenhum cliente encontrado para essa referenciaPix"}), 404
+
+        endereco = w3.to_checksum_address(endereco)
         print("Endereço cliente:", endereco)
-    except ValueError:
-        return jsonify({"erro": "Formato de endereço da carteira inválido!"}), 400
 
-    print("Contrato usado:", sistema_cliente_address)
-
-    sistemaCliente = w3.eth.contract(address=sistema_cliente_address, abi=sistema_cliente_abi)
-
-    try:
-        dados = sistemaCliente.functions.mostraInfoCliente(endereco).call()
-        enderecoConta, nome, saldo, registrado, referenciaPix, email = dados
-
-        # Converter saldo para ETH e depois para BRL
-        saldo_eth = w3.from_wei(saldo, 'ether')
-
-        # Buscar cotação atual do ETH em BRL
-        try:
-            cotacao_eth_brl = get_eth_to_brl()
-            saldo_reais = float(saldo_eth) * cotacao_eth_brl
-        except Exception as e:
-            print(f"Erro ao buscar cotação: {e}")
-            cotacao_eth_brl = None
-            saldo_reais = None
+        # Chama o contrato para pegar as informações completas
+        dados = sistema_cliente.functions.mostraInfoCliente(endereco).call()
+        carteiraContrato, nome, saldo, registrado, referenciaPix, email = dados
 
         return jsonify({
             "nome": nome,
             "email": email,
             "referenciaPix": referenciaPix,
-            "enderecoConta": enderecoConta,
-            "saldo": {
-                "wei": saldo,
-                "eth": str(saldo_eth),
-                "reais": round(saldo_reais, 2) if saldo_reais is not None else None
-            },
-            "cotacao_eth_brl": round(cotacao_eth_brl, 2) if cotacao_eth_brl is not None else None,
+            "carteira": carteiraContrato,
             "registrado": registrado
         })
 
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar informações do cliente: {str(e)}"}), 500
-        
-"""
 
 
 @app.route("/getName", methods=["GET"])
@@ -720,8 +708,8 @@ def transferirEntreUsers():
         return jsonify({"erro": f"Erro ao processar transação: {str(e)}"}), 500
 
 # Nova rota para listar transações de um cliente
-@app.route("/transacoesCliente", methods=["GET"])
-def listarTransacoesCliente():
+@app.route("/getTransacoesCliente", methods=["GET"])
+def getTransacoesCliente():
     referencia_pix = request.args.get("referenciaPix")
 
     if not referencia_pix:
@@ -757,6 +745,22 @@ def listarTransacoesCliente():
         return jsonify({"erro": f"Erro ao buscar transações: {str(e)}"}), 500
 
 # Doação para ONG:
+
+"""""
+tx = etherFlow.functions.setContaOng(ongWallet).build_transaction({
+    "from": admWallet,
+    "nonce": w3.eth.get_transaction_count(admWallet),
+    "gas": 100000,
+    "gasPrice": w3.eth.gas_price
+})
+
+signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+conta_ong = etherFlow.functions.contaOng().call()
+print("Endereço da ONG configurado:", conta_ong)
+"""""
+
+
 @app.route("/donate", methods=["POST"])
 def donate():
     data = request.get_json()
@@ -780,7 +784,7 @@ def donate():
     try:
         # Buscar endereço do cliente pela referência Pix
         endereco_cliente = sistema_cliente.functions.getEnderecoPorPix(referencia_pix).call()
-        if not w3.is_address(endereco_cliente) or endereco_cliente == w3.to_checksum_address("0x0000000000000000000000000000000000000000"):
+        if not w3.is_address(endereco_cliente) or endereco_cliente == "0x0000000000000000000000000000000000000000":
             return jsonify({"erro": "Cliente não registrado com essa referência Pix"}), 400
 
         cliente_db = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
@@ -794,7 +798,7 @@ def donate():
         valor_eth = valor_reais / cotacao
         valor_wei = w3.to_wei(valor_eth, 'ether')
 
-        # Criar transação (saldo já será verificado no contrato)
+        # Criar transação de doação direta
         nonce = w3.eth.get_transaction_count(endereco_cliente)
         tx = etherFlow.functions.doacaoDireta().build_transaction({
             "from": endereco_cliente,
@@ -810,20 +814,21 @@ def donate():
 
         # Registrar no banco
         try:
-            cliente_db = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
-            if cliente_db:
-                nova_transacao = Transacao(
-                    valor_pagamento=valor_reais,
-                    descricao="Doação para ONG",
-                    beneficiado="ONG - Conta: 0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F",
-                    hash_transacao=signed_tx["transactionHash"].hex(),
-                    cliente_id=cliente_db.id
-                )
-                db.session.add(nova_transacao)
-                db.session.commit()
+            nova_transacao = Transacao(
+                valor_pagamento=valor_reais,
+                descricao="Doação para ONG",
+                beneficiado="ONG",  # você pode opcionalmente buscar o endereço real abaixo
+                hash_transacao=signed_tx["transactionHash"].hex(),
+                cliente_id=cliente_db.id
+            )
+            db.session.add(nova_transacao)
+            db.session.commit()
         except Exception as e:
             db.session.rollback()
             print(f"Erro ao registrar no BD: {str(e)}")
+
+        # Buscar endereço da ONG do contrato
+        endereco_ong = etherFlow.functions.contaOng().call()
 
         return jsonify({
             "status": "Doação realizada com sucesso!",
@@ -834,13 +839,46 @@ def donate():
             "transaction_hash": signed_tx["transactionHash"].hex(),
             "gas_usado": signed_tx.get("gasUsed", "N/A"),
             "endereco_doador": endereco_cliente,
-            "endereco_ong": "0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F"
+            "endereco_ong": endereco_ong
         })
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"erro": f"Erro ao processar a doação: {str(e)}"}), 500
+
+@app.route("/ethereum_brl_mensal", methods=["GET"])
+def ethereum_brl_mensal():
+    try:
+        # Meses e valores em BRL
+        meses = [
+            "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+            "Jul", "Ago", "Set"
+        ]
+        valores_brl = [
+            3298.26*5.5, 2237.90*5.5, 1823.48*5.5, 1793.78*5.5,
+            2529.09*5.5, 2486.46*5.5, 3696.71*5.5, 4497.18*5.5,
+            4590.00*5.5
+        ]
+
+        # Criar o gráfico
+        plt.figure(figsize=(9,5))
+        plt.plot(meses, valores_brl, marker="o", color="blue", linewidth=2)
+        plt.title("Ethereum (ETH) em BRL - Janeiro a Setembro 2025", fontsize=14)
+        plt.xlabel("Mês")
+        plt.ylabel("Preço (R$)")
+        plt.grid(True)
+
+        # Salvar em memória
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format="png", bbox_inches="tight")
+        buffer.seek(0)
+        plt.close()
+
+        return Response(buffer.getvalue(), mimetype="image/png")
+
+    except Exception as e:
+        return {"error": str(e)}, 500
 
 """
                                 Implantação dos QRCodes:

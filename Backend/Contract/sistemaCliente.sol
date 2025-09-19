@@ -169,11 +169,6 @@ contract SistemaCliente {
         return pixCliente[_referenciaPix];
     }
 
-
-    function getEndereco(string memory referenciaPix) public view returns (address) {
-        return pixCliente[referenciaPix];
-    }
-
     // ========== Info de cliente ==========
     function mostraInfoClienteEmail(string memory email)
         public
@@ -186,26 +181,18 @@ contract SistemaCliente {
         return (c.carteira, c.nome, c.saldo, c.registrado, c.referenciaPix);
     }
 
-    function mostraInfoCliente(address cliente)
+    function mostraInfoCliente(string memory referenciaPix)
         public
         view
         returns (address, string memory, uint256, bool, string memory, string memory)
     {
-        Cliente memory c = clientes[cliente];
+        address clienteAddr = pixCliente[referenciaPix];  // pega endereço via PIX
+        require(clienteAddr != address(0), "Cliente nao encontrado para esse referenciaPix");
+
+        Cliente memory c = clientes[clienteAddr];        // agora acessa pelo address
         return (c.carteira, c.nome, c.saldo, c.registrado, c.referenciaPix, c.email);
     }
 
-    function mostraInfoClientePix(string memory referenciaPix)
-        public
-        view
-        returns (address, string memory, uint256, bool, string memory)
-    {
-        address clienteAddress = pixCliente[referenciaPix];
-        require(clienteAddress != address(0), "Cliente nao encontrado para essa referencia Pix");
-        Cliente memory c = clientes[clienteAddress];
-        // Corrigido: retorna a referenciaPix (nao o email)
-        return (c.carteira, c.nome, c.saldo, c.registrado, c.referenciaPix);
-    }
 
     function ClienteRegistrado(address cliente) public view returns (bool) {
         return clientes[cliente].registrado;
