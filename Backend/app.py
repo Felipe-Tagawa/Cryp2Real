@@ -1,7 +1,9 @@
 import hashlib
 import os
+import secrets
 import traceback
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 
 from flask import Flask, jsonify, request, session
 from flask import send_file
@@ -15,6 +17,8 @@ from Backend.utils import sign_n_send, get_eth_to_brl, getGanacheAccount
 
 # listAllAccounts() -- Uso p/ Debug
 
+load_dotenv()
+
 db = SQLAlchemy()
 
 class Config:
@@ -26,7 +30,7 @@ class Config:
         print("🚀 Conectando ao banco de produção (Railway)")
     else:
         # Configuração local
-        SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://root:root@localhost/sistema_blockchain_cliente'
+        SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://root:{os.getenv('BDPASS')}@localhost/sistema_blockchain_cliente"
         print("Conectado ao Banco Local")
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -36,6 +40,8 @@ CORS(app)
 app.config.from_object(Config)
 
 db.init_app(app)
+
+app.secret_key = secrets.token_hex(16)
 
 class Cliente(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -159,7 +165,6 @@ def registro_cliente():
         db.session.commit()
 
         # Salva na sessão para já estar logado
-        #session['cliente_id'] = newClient.id
         session['email'] = newClient.email
         session['carteira'] = newClient.carteira
 
@@ -264,6 +269,39 @@ def mostraInfoCliente():
         
 """
 
+
+@app.route("/getName", methods=["GET"])
+def getName():
+    referencia_pix = request.args.get("referenciaPix")
+
+    if not referencia_pix:
+        return jsonify({"erro": "referenciaPix obrigatória na query string"}), 400
+
+    try:
+        # Tenta buscar o cliente no banco de dados
+        cliente = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
+        if not cliente:
+            return jsonify({"erro": "Cliente não encontrado"}), 404
+
+        # Tenta buscar o nome no contrato Solidity
+        try:
+            nome_cliente = etherFlow.functions.getNomeCliente(referencia_pix).call()
+        except Exception as e:
+            nome_cliente = None
+            print(f"Erro ao buscar nome no contrato: {e}")
+
+        return jsonify({
+            "status": "sucesso",
+            "cliente_id": cliente.id,
+            "referenciaPix": cliente.referenciaPix,
+            "nome": nome_cliente if nome_cliente else cliente.nome  # fallback para banco
+        }), 200
+
+    except Exception as e:
+        # Qualquer outro erro inesperado
+        return jsonify({"erro": f"Erro interno ao buscar cliente: {str(e)}"}), 500
+
+
 @app.route("/getBalance", methods=["GET"])
 def getBalance():
     try:
@@ -290,12 +328,11 @@ def getBalance():
 
         # Saldo interno no contrato
         try:
-            saldo_interno_wei = etherFlow.functions.saldoCliente(address).call()
+            saldo_interno_wei = etherFlow.functions.saldoCliente().call({'from': address})
             saldo_interno_eth = w3.from_wei(saldo_interno_wei, "ether")
         except Exception as e:
-            print(f"Erro ao buscar saldo interno: {e}")
-
             saldo_interno_eth = None
+            print(f"Erro ao buscar saldo interno: {e}")
 
         # CONVERSÃO SIMPLIFICADA: 1 ETH = 1 BRL
         cotacao_eth_brl = 1.0

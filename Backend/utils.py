@@ -76,7 +76,7 @@ def reset_accounts_control():
         owner_account = w3.eth.accounts[0]
 
         # Lista de contas que você quer remover
-        ganache_accounts = w3.eth.accounts[3:7]  # ajuste conforme suas contas
+        ganache_accounts = w3.eth.accounts[3:16]
 
         for cliente in ganache_accounts:
             # verifica se o cliente está registrado

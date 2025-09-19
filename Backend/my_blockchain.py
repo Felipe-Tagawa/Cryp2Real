@@ -1,12 +1,14 @@
+import os
+
 from eth_account import Account
 from web3 import Web3
 from dotenv import load_dotenv
 from Backend.deploy_output import sistema_cliente_address, etherFlow_address, sistema_cliente_abi, etherFlow_abi
 
-load_dotenv()
+load_dotenv("configurations.env")
 
-GANACHE_URL = "http://127.0.0.1:7545"
-PRIVATE_KEY = "0xf585ecd681060deb9f54d4b0a6dad7b23b6a7ec774c2ede437b546610be3cdef"
+GANACHE_URL = os.getenv("GANACHE_URL")
+PRIVATE_KEY = os.getenv('PRIVATEKEY')
 
 w3 = Web3(Web3.HTTPProvider(GANACHE_URL))
 
