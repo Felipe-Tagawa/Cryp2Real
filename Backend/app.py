@@ -37,7 +37,6 @@ class Config:
 app = Flask(__name__)
 CORS(app)
 app.config.from_object(Config)
-
 db.init_app(app)
 
 app.secret_key = secrets.token_hex(16)
@@ -82,7 +81,6 @@ class Transacao(db.Model):
 def run():
     return 'API funcionando com sucesso!'
 
-
 @app.route("/test-db")
 def test_db():
     try:
@@ -92,7 +90,6 @@ def test_db():
     except Exception as e:
         return f"Erro na conexão: {str(e)}"
 
-
 @app.route("/test-ganache")
 def test_ganache():
     try:
@@ -100,16 +97,31 @@ def test_ganache():
             return {
                 "status": "conectado",
                 "conta_padrao": w3.eth.accounts[0],
-                "block_number": w3.eth.block_number
+                "block_number": w3.eth.block_number # Número do último bloco da blockchain acessado
             }
         else:
             return {"status": "desconectado"}, 500
     except Exception as e:
         return {"status": "erro", "mensagem": str(e)}, 500
 
-
 @app.route("/registrarCliente", methods=["POST"])
 def registro_cliente():
+    """
+    Registra um novo cliente no sistema (blockchain + banco de dados).
+
+    Args:
+        Nenhum argumento direto. Recebe JSON no body com:
+            nome (str): Nome do cliente (mínimo 2 caracteres).
+            referenciaPix (str): Chave PIX única do cliente.
+            email (str): Email do cliente (único).
+            senha (str): Senha em texto plano (mínimo 6 caracteres).
+
+    Returns:
+        flask.Response: JSON com dados do cliente registrado ou erro.
+            200: Registro bem-sucedido.
+            400: Erro de validação ou duplicidade.
+            500: Erro interno ao salvar no blockchain ou banco de dados.
+    """
     try:
         data = request.get_json()
         nome = data.get("nome", "").strip()
@@ -219,6 +231,20 @@ def registro_cliente():
 
 @app.route("/cliente_registrado", methods=["GET"])
 def cliente_registrado():
+
+    """
+    Verifica se um cliente está registrado com sucesso no sistema (DEBUG).
+
+    Args:
+        Nenhum argumento direto. Recebe JSON no body com:
+            endereco (str): Endereço da conta do cliente em questão.
+    Returns:
+        flask.Response: JSON com endereço e boolean de registrado ou erro.
+            200: Usuário registrado.
+            400: Erro de validação de endereço.
+            500: Erro interno ao verificar o registro do usuário.
+    """
+
     endereco = request.args.get("endereco")
     if not endereco:
         return jsonify({"erro": "Parâmetro 'endereco' obrigatório"}), 400
@@ -236,6 +262,27 @@ def cliente_registrado():
 
 @app.route("/mostraInfoCliente", methods=["GET"])
 def mostraInfoCliente():
+    """
+        Retorna informações detalhadas de um cliente a partir da referência Pix.
+
+        Args:
+            referenciaPix (str): Passado via query string (?referenciaPix=...).
+                Identificador Pix único do cliente.
+
+        Returns:
+            flask.Response: JSON contendo:
+                - nome (str): Nome do cliente.
+                - email (str): Email do cliente.
+                - referenciaPix (str): Referência Pix.
+                - carteira (str): Endereço Ethereum.
+                - registrado (bool): Status de registro.
+                - saldo_eth (float): Saldo da carteira em ETH.
+            Erros:
+                400: Parâmetro ausente.
+                404: Cliente não encontrado.
+                500: Erro interno.
+        """
+
     referencia_pix = request.args.get("referenciaPix")
 
     if not referencia_pix:
@@ -269,6 +316,25 @@ def mostraInfoCliente():
 
 @app.route("/getName", methods=["GET"])
 def getName():
+    """
+        Retorna o nome de um cliente pelo Pix.
+
+        Args:
+            referenciaPix (str): Passado via query string.
+                Identificador Pix do cliente.
+
+        Returns:
+            flask.Response: JSON contendo:
+                - status (str): "sucesso".
+                - cliente_id (int): ID no banco de dados.
+                - referenciaPix (str): Referência Pix.
+                - nome (str): Nome do cliente (contrato > banco).
+            Erros:
+                400: Parâmetro ausente.
+                404: Cliente não encontrado.
+                500: Erro interno.
+        """
+
     referencia_pix = request.args.get("referenciaPix")
 
     if not referencia_pix:
@@ -304,6 +370,30 @@ def getName():
 
 @app.route("/getBalance", methods=["GET"])
 def getBalance():
+    """
+        Retorna o saldo de um cliente em ETH e BRL.
+
+        Args:
+            referenciaPix (str, opcional): Passado via query string.
+                Se ausente, usa o cliente da sessão.
+
+        Returns:
+            flask.Response: JSON contendo:
+                - status (str): "sucesso".
+                - cliente_id (int), nome (str), email (str).
+                - referenciaPix (str).
+                - carteira (str): Endereço Ethereum.
+                - balance_eth (float): Saldo em ETH.
+                - balance_brl (float): Saldo convertido em BRL.
+                - cotacao_eth_brl (float): Cotação usada.
+                - fonte_dados (str).
+                - timestamp (str, ISO8601).
+            Erros:
+                400: Parâmetro ou sessão inválida.
+                404: Cliente não encontrado.
+                500: Erro interno.
+        """
+
     try:
         referencia_pix = request.args.get('referenciaPix')
 
@@ -353,6 +443,29 @@ def getBalance():
 
 @app.route("/realizaPagamento", methods=["POST"])
 def realizaPagamento():
+    """
+        Realiza um pagamento de um cliente para um comerciante.
+
+        Args:
+            JSON (dict): Body da requisição contendo:
+                - valor_reais (float): Valor em reais (BRL).
+                - referenciaPix (str): Chave Pix do cliente.
+                - comerciante (str): Endereço Ethereum do comerciante.
+                - descricao (str, opcional): Descrição do pagamento.
+
+        Returns:
+            flask.Response: JSON contendo:
+                - status (str).
+                - valor_reais (float), valor_eth (float), valor_wei (int).
+                - transaction_hash (str).
+                - gas_usado (int).
+                - descricao (str).
+                - beneficiado (str).
+                - comerciante (str).
+            Erros:
+                400: Dados inválidos ou saldo insuficiente.
+                500: Erro interno.
+        """
     data = request.get_json()
     if not data:
         return jsonify({"erro": "Dados JSON não fornecidos"}), 400
@@ -476,6 +589,33 @@ def realizaPagamento():
 
 @app.route("/transferirEntreUsers", methods=["POST"])
 def transferirEntreUsers():
+    """
+        Realiza transferência de ETH entre usuários cadastrados.
+
+        Args:
+            JSON (dict): Body da requisição contendo:
+                - referencia_origem (str).
+                - referencia_destino (str).
+                - tipo_transferencia (str): "eth_direto" ou "sem_taxas".
+                - valor_eth (float): Quantidade em ETH.
+                - descricao (str, opcional).
+
+        Returns:
+            flask.Response: JSON contendo:
+                - status (str).
+                - tipo_transferencia (str).
+                - valor_reais (float), valor_eth (float), valor_wei (int).
+                - transaction_hash (str).
+                - gas_usado (int).
+                - descricao (str).
+                - beneficiado (str).
+                - origem (dict): Referência e endereço.
+                - destino (dict): Referência e endereço.
+            Erros:
+                400: Dados inválidos ou saldo insuficiente.
+                500: Erro interno.
+        """
+
     global valor_reais
     data = request.get_json()
     if not data:
@@ -640,6 +780,24 @@ def transferirEntreUsers():
 
 @app.route("/getTransacoesCliente", methods=["GET"])
 def getTransacoesCliente():
+    """
+        Retorna todas as transações de um cliente.
+
+        Args:
+            referenciaPix (str): Passado via query string.
+
+        Returns:
+            flask.Response: JSON contendo:
+                - cliente (str).
+                - referencia_pix (str).
+                - total_transacoes (int).
+                - transacoes (list[dict]): Detalhes de cada transação.
+            Erros:
+                400: Parâmetro ausente.
+                404: Cliente não encontrado.
+                500: Erro interno.
+        """
+
     referencia_pix = request.args.get("referenciaPix")
 
     if not referencia_pix:
@@ -690,6 +848,28 @@ print("Endereço da ONG configurado:", conta_ong)
 
 @app.route("/donate", methods=["POST"])
 def donate():
+    """
+        Realiza uma doação de um cliente para a ONG configurada.
+
+        Args:
+            JSON (dict): Body da requisição contendo:
+                - valorReais (float): Valor em BRL.
+                - referenciaPix (str): Chave Pix do cliente.
+
+        Returns:
+            flask.Response: JSON contendo:
+                - status (str).
+                - valor_wei (int), valor_eth (str), valor_brl (float).
+                - cotacao (str).
+                - transaction_hash (str).
+                - gas_usado (int ou "N/A").
+                - endereco_doador (str).
+                - endereco_ong (str).
+            Erros:
+                400: Dados inválidos.
+                500: Erro interno.
+        """
+
     data = request.get_json()
 
     if not data:
@@ -776,6 +956,18 @@ def donate():
 
 @app.route("/ethereum_brl_mensal", methods=["GET"])
 def ethereum_brl_mensal():
+    """
+        Retorna um gráfico da cotação ETH em BRL de Janeiro a Setembro de 2025.
+
+        Args:
+            Nenhum.
+
+        Returns:
+            flask.Response: Imagem PNG do gráfico.
+            Erros:
+                500: Erro interno ao gerar gráfico.
+        """
+
     try:
         # Meses e valores em BRL
         meses = [
@@ -810,6 +1002,19 @@ def ethereum_brl_mensal():
 
 @app.route("/currentETH", methods=["GET"])
 def getCurrentETH():
+    """
+        Retorna a cotação atual do Ethereum em BRL.
+
+        Args:
+            Nenhum.
+
+        Returns:
+            flask.Response: JSON com:
+                - ethereum_brl (float).
+            Erros:
+                500: Erro interno ao buscar cotação.
+        """
+
     try:
         price = get_eth_to_brl()
         return jsonify({"ethereum_brl": price}), 200
@@ -820,6 +1025,20 @@ def getCurrentETH():
 
 @app.route('/calcular_projecao', methods=['POST'])
 def projectionCalculate():
+    """
+        Calcula projeções financeiras com base em um investimento inicial em ETH.
+
+        Args:
+            JSON (dict): Body da requisição contendo:
+                - investimento_inicial_eth (float): Valor inicial em ETH.
+
+        Returns:
+            flask.Response: JSON com resultados da projeção.
+            Erros:
+                400: Parâmetro inválido.
+                500: Erro interno.
+        """
+
     try:
         dados = request.get_json()
 
@@ -834,12 +1053,6 @@ def projectionCalculate():
 
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
-
-"""
-                                Implantação dos QRCodes:
-                                Registro: Site
-                                Comerciante: Transação Pix
-"""
 
 # Inicializar o serviço de QR codes
 qr_service = QRCodeService()
