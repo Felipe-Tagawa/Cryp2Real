@@ -7,7 +7,7 @@
       <excludeFolder url="file://$MODULE_DIR$/Backend/crip2-real-bmw7m9/android/.gradle" />
       <excludeFolder url="file://$MODULE_DIR$/Backend/crip2-real-bmw7m9/lib" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.13 (Cryp2Real)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.13" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>
