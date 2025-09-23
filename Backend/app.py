@@ -13,7 +13,7 @@ from flask_sqlalchemy import SQLAlchemy
 from matplotlib import pyplot as plt
 from sqlalchemy import text
 
-from Backend.my_blockchain import w3, etherFlow, sistema_cliente
+from Backend.my_blockchain import w3, etherFlow, sistema_cliente, PRIVATE_KEY, admWallet, ongWallet
 from Backend.qr_service import QRCodeService
 from Backend.utils import sign_n_send, get_eth_to_brl, getGanacheAccount
 
@@ -673,9 +673,9 @@ def getTransacoesCliente():
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar transações: {str(e)}"}), 500
 
+
 # Doação para ONG:
 
-"""""
 tx = etherFlow.functions.setContaOng(ongWallet).build_transaction({
     "from": admWallet,
     "nonce": w3.eth.get_transaction_count(admWallet),
@@ -687,8 +687,6 @@ signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
 tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 conta_ong = etherFlow.functions.contaOng().call()
 print("Endereço da ONG configurado:", conta_ong)
-"""""
-
 
 @app.route("/donate", methods=["POST"])
 def donate():
@@ -722,9 +720,8 @@ def donate():
 
         private_key_cliente = cliente_db.private_key
 
-        # Conversão BRL → ETH → WEI
-        cotacao = get_eth_to_brl()
-        valor_eth = valor_reais / cotacao
+        # Conversão fixa: 1 ETH = 1 BRL
+        valor_eth = valor_reais  # direto, sem cotação
         valor_wei = w3.to_wei(valor_eth, 'ether')
 
         # Criar transação de doação direta
@@ -746,7 +743,7 @@ def donate():
             nova_transacao = Transacao(
                 valor_pagamento=valor_reais,
                 descricao="Doação para ONG",
-                beneficiado="ONG",  # você pode opcionalmente buscar o endereço real abaixo
+                beneficiado="ONG",
                 hash_transacao=signed_tx["transactionHash"].hex(),
                 cliente_id=cliente_db.id
             )
@@ -764,7 +761,7 @@ def donate():
             "valor_wei": int(valor_wei),
             "valor_eth": str(valor_eth),
             "valor_brl": round(valor_reais, 2),
-            "cotacao": cotacao,
+            "cotacao": "1 ETH = 1 BRL (fixo)",
             "transaction_hash": signed_tx["transactionHash"].hex(),
             "gas_usado": signed_tx.get("gasUsed", "N/A"),
             "endereco_doador": endereco_cliente,
@@ -775,6 +772,7 @@ def donate():
         import traceback
         traceback.print_exc()
         return jsonify({"erro": f"Erro ao processar a doação: {str(e)}"}), 500
+
 
 @app.route("/ethereum_brl_mensal", methods=["GET"])
 def ethereum_brl_mensal():
@@ -808,6 +806,16 @@ def ethereum_brl_mensal():
 
     except Exception as e:
         return {"error": str(e)}, 500
+
+
+@app.route("/currentETH", methods=["GET"])
+def getCurrentETH():
+    try:
+        price = get_eth_to_brl()
+        return jsonify({"ethereum_brl": price}), 200
+    except Exception as e:
+        print(e)
+        return jsonify({"error": str(e)}), 500
 
 """
                                 Implantação dos QRCodes:
