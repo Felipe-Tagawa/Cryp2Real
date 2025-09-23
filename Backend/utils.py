@@ -12,24 +12,24 @@ BALANCE_TOLERANCE = 50
 
 # Mapeamento das chaves privadas DISPONÍVEIS
 GANACHE_PRIVATE_KEYS = {
-    3: "0x17955ca81ffdbf3f19eff23a95f052a3de3078aee2bdb021697ba43e205f8315",
-    4: "0xedac0eb30988b13c9b9f23499d9dc631182ca54c61116e06dc6581eb166b1c7b",
-    5: "0xfb43c746bd917f896cad406c650ce8d9584e292f0def92d0bd2fb175f5af0baf",
-    6: "0x01bbc71b2b68d89c6c0af6032d87a68b6126624fb28e7d43037588a4e583b26c",
-    7: "0x23abee6eb0f97b149c5527b730065278e3485b3f81fd06b161115f94d1174978",
-    8: "0x29b98f622877f0e263e39543489bad9e2f9c108d183a6b60bb414d9991e866e9",
-    9: "0x49ed7fe68774ff7474f730ec259e56957445cd7ceac2af3485dcecd551510f3b",
-    10: "0xef3a4dfbc7ef336e6b51eb5cc4cd76724517e5d34255bbcc35b72993b01a4b4c",
-    11: "0x56da96aa8d7f91407ebd103b9afb9261297cc7716e8db7a7f420a93133ebc630",
-    12: "0x764f964abfe171a3a5f3077293500b738df159b24316aebc252ee6cded4e9716",
-    13: "0xb6af242377ef688ceb07366416f4220fa89d2779a43cb04b21818510a06e0a53",
-    14: "0x2945d4bfd655e04cf2cc000e4620d2eb126438837deaa0ae4c2949ea592f0cf4",
-    15: "0x336d8fbbbbecbf8039a205b209ed488835109a5a26fc035dab59be53feb7bbd6",
-    16: "0xde4abe4b135ce77ced239df1d7797595b1cee1b23dfe24dfe9ef10e491a79ae5",
-    17: "0x3904f9aa43ecf8740cb5bed7c9218219399b6c3a70282f2ea47e5344340ff533",
-    18: "0xcc6dc67ac4293f39589d569f4de218e790173f45a404f33b374a212ae70d1903",
-    19: "0xa9697b132dd04ceae4313e99648a9e0344a8bb201e5d74d92887f88a06c77f32",
-    20: "0x4f780be88812e1d1c05759afc24f31171a2e3457d332a722da8e88905850f4da"
+    3: "0xc6ede890317519c2a17cbf1aaf24763c3373b14a5bacd9b12b429d4fa22511df",
+    4: "0x21af7d9b31bb12c704f9b2794e943f55e7727676882227e2a0e1a1870db8e905",
+    5: "0xfc627e2e4bce3d9e8413cb311154ccff512c1949ed035036fa4cff88fede7707",
+    6: "0x440b22e6b4d83d749668fc7e18e24f1c6f9c9d080acbc87478a6167d26c522a7",
+    7: "0x9b216a57c27e7768d87c8191123a40ad88a7b4cea5e8b394c5561b30aae6eb68",
+    8: "0x4e42c377871aa458a1cf29d5ad47a13a8e4086b65aaa62e4a9c2bc850fc1925b",
+    9: "0xe6551f303f58d910489279606532758916887bb0211a3df6fac70b8b3e5b42d4",
+    10: "0x3063f3394c65b44eeca4dbb328da00e54d5fb7ef0d582f8c1c373a49e8612a5d",
+    11: "0xbb458a3a02b86516aca1c5da1e38d3a0840a19aaa7ecfc85cb458164a03b92d2",
+    12: "0xf55d32c3f5c627340a89ee3b997836620d1fd9eef08770d62705534e4268272a",
+    13: "0x0dfd6c0be889a4c6ca773d45e036c8edeabfedcac1e1c858b7955aeea36ff84d",
+    14: "0xe519b9b9c8ee1d7d80cc4b463c101a666fd6d9aa6890713741716e5b5bcb953e",
+    15: "0x16e54c0ca8894085d6dc5ee3f227e48bc613a496a2cb655ddb42217a1de3c0a0",
+    16: "0x5ee8a8a5868d42fbfc8b19fd2c892b66e0596155feaa6632296d38347703ccb2",
+    17: "0x503623b7131c4f82abf4e9b09403a0ad92ccf95c4cdf6389b8a889b0254d2e7d",
+    18: "0xd1665777aa855cf053a3f6a68c2f4791f3d467147eb0083824ea5616e46b9027",
+    19: "0x070e37f5fefda600800308131b1790bccbb218fbeed05e71e513ec24e19e4e0c",
+    20: "0xe67eda8a535e32f3d5fd8eeee1d76f4d936d414ce6d4634114dbfb45103e7b40"
 }
 
 ACCOUNTS_CONTROL_FILE = "accounts_control.json"
@@ -348,6 +348,20 @@ def listAllAccounts():
     for conta in w3.eth.accounts:
         saldo = w3.from_wei(w3.eth.get_balance(conta), 'ether')
         print(conta, saldo)
+
+def calcular_projecao(investimento_inicial_eth):
+
+    # Projeção de 30 dias com um crescimento de 5%
+    taxa_de_crescimento_mensal = 0.05
+    projecao_30_dias_eth = investimento_inicial_eth * (1 + taxa_de_crescimento_mensal)
+
+    # Projeção de 1 ano com um crescimento de 5% ao mês (composto)
+    projecao_1_ano_eth = investimento_inicial_eth * (1 + taxa_de_crescimento_mensal)**12
+
+    return {
+        "projecao_30_dias_eth": projecao_30_dias_eth,
+        "projecao_1_ano_eth": projecao_1_ano_eth
+    }
 
 
 if __name__ == "__main__":

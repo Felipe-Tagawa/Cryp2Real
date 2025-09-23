@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from Backend.my_blockchain import w3, etherFlow, sistema_cliente, PRIVATE_KEY, admWallet, ongWallet
 from Backend.qr_service import QRCodeService
-from Backend.utils import sign_n_send, get_eth_to_brl, getGanacheAccount
+from Backend.utils import sign_n_send, get_eth_to_brl, getGanacheAccount, calcular_projecao
 
 load_dotenv()
 
@@ -816,6 +816,24 @@ def getCurrentETH():
     except Exception as e:
         print(e)
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/calcular_projecao', methods=['POST'])
+def projectionCalculate():
+    try:
+        dados = request.get_json()
+
+        investimento_inicial = dados.get('investimento_inicial_eth')
+
+        # Verifica se o valor é válido (não nulo e numérico)
+        if investimento_inicial is None or not isinstance(investimento_inicial, (int, float)):
+            return jsonify({"erro": "Parâmetro 'investimento_inicial_eth' inválido"}), 400
+
+        resultados = calcular_projecao(investimento_inicial)
+        return jsonify(resultados), 200
+
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
 
 """
                                 Implantação dos QRCodes:
