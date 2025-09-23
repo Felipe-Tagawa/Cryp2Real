@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.19;
 
-// Interface para o contrato SistemaCliente (conexão de contratos)
+// Interface simplificada para o contrato SistemaCliente
 interface ISistemaCliente {
     function ClienteRegistrado(address cliente) external view returns (bool);
     function getNomeCliente(address cliente) external view returns (string memory);
     function getEmailCliente(address cliente) external view returns (string memory);
-    function saldoCliente(address cliente) external view returns (uint256);
-    function atualizarSaldoCliente(address cliente, uint256 novoSaldo) external;
 }
 
 contract etherFlow {
@@ -96,27 +94,22 @@ contract etherFlow {
         return address(contaOng).balance;
     }
 
+    // Pagamento para comerciante usando ETH direto (sem saldo interno)
     function realizaPagamentoCliente(
         uint256 valor,
         string memory referenciaPix,
         address payable clienteDestino
-    ) public noReentrance apenasClienteRegistrado {
-        require(valor > 0, "Valor deve ser maior que zero");
+    ) public payable noReentrance apenasClienteRegistrado {
+        require(msg.value > 0, "Valor ETH deve ser maior que zero");
+        require(msg.value >= valor, "ETH enviado insuficiente");
         require(clienteDestino != address(0), "Endereco cliente destino invalido");
         require(bytes(referenciaPix).length > 0, "Referencia PIX invalida");
-
-        uint256 saldoAtual = clientes.saldoCliente(msg.sender);
-        require(saldoAtual >= valor, "Saldo insuficiente.");
 
         uint256 valorComissao = (valor * percentComissao) / 1000;
         uint256 valorParaOng = (valor * percentOng) / 1000;
         uint256 valorCliente = valor - valorComissao - valorParaOng;
 
         require(valorCliente > 0, "Valor liquido deve ser maior que zero");
-
-        // Atualizar saldo do cliente
-        uint256 novoSaldo = saldoAtual - valor;
-        clientes.atualizarSaldoCliente(msg.sender, novoSaldo);
 
         transacoesPorCliente[clienteDestino]++;
 
@@ -139,10 +132,7 @@ contract etherFlow {
         transacoes.push(novaTransacao);
         pixParaIndiceTransacao[referenciaPix] = transacoes.length - 1;
 
-        // Verificar se o contrato tem saldo suficiente antes das transferências
-        require(address(this).balance >= valorComissao + valorParaOng + valorCliente, "Contrato com saldo insuficiente");
-
-        // Realizar transferências
+        // Realizar transferências usando ETH enviado
         (bool successComissao,) = payable(dono).call{value: valorComissao}("");
         require(successComissao, "Falha na transferencia da comissao");
 
@@ -153,6 +143,13 @@ contract etherFlow {
 
         (bool successCliente,) = clienteDestino.call{value: valorCliente}("");
         require(successCliente, "Falha na transferencia para cliente");
+
+        // Retornar o troco se houver
+        uint256 troco = msg.value - valor;
+        if (troco > 0) {
+            (bool successTroco,) = payable(msg.sender).call{value: troco}("");
+            require(successTroco, "Falha ao retornar troco");
+        }
 
         emit PagamentoRecebido(
             clienteDestino,
@@ -170,86 +167,7 @@ contract etherFlow {
         emit pagamentoRealizado(msg.sender, valor, referenciaPix);
     }
 
-    // Transferência P2P entre usuários usando saldo interno
-    function transferirParaUsuario(
-        uint256 valor,
-        string memory referenciaPix,
-        address payable usuarioDestino
-    ) public noReentrance apenasClienteRegistrado {
-        require(usuarioDestino != address(0), "Endereco destino invalido");
-        require(usuarioDestino != msg.sender, "Nao pode transferir para si mesmo");
-        require(valor > 0, "Valor deve ser maior que zero");
-        require(bytes(referenciaPix).length > 0, "Referencia PIX invalida");
-        require(clientes.ClienteRegistrado(usuarioDestino), "Usuario destino nao registrado");
-
-        uint256 saldoAtual = clientes.saldoCliente(msg.sender);
-        require(saldoAtual >= valor, "Saldo insuficiente");
-
-        // Calcular taxas
-        uint256 valorComissao = (valor * percentComissao) / 1000;
-        uint256 valorParaOng = (valor * percentOng) / 1000;
-        uint256 valorLiquido = valor - valorComissao - valorParaOng;
-
-        require(valorLiquido > 0, "Valor liquido deve ser maior que zero");
-
-        // Atualizar saldos internos
-        uint256 novoSaldoOrigem = saldoAtual - valor;
-        uint256 saldoDestinoAtual = clientes.saldoCliente(usuarioDestino);
-        uint256 novoSaldoDestino = saldoDestinoAtual + valorLiquido;
-
-        clientes.atualizarSaldoCliente(msg.sender, novoSaldoOrigem);
-        clientes.atualizarSaldoCliente(usuarioDestino, novoSaldoDestino);
-
-        transacoesPorCliente[usuarioDestino]++;
-
-        string memory nomeCliente = clientes.getNomeCliente(msg.sender);
-        string memory emailCliente = clientes.getEmailCliente(msg.sender);
-
-        Transacao memory novaTransacao = Transacao({
-            clienteDestino: usuarioDestino,
-            pagador: msg.sender,
-            valorTotal: valor,
-            valorCliente: valorLiquido,
-            valorComissao: valorComissao,
-            valorParaOng: valorParaOng,
-            timestamp: block.timestamp,
-            referenciaPix: referenciaPix,
-            nomeCliente: nomeCliente,
-            emailCliente: emailCliente
-        });
-
-        transacoes.push(novaTransacao);
-        pixParaIndiceTransacao[referenciaPix] = transacoes.length - 1;
-
-        // Verificar saldo do contrato antes das transferências
-        require(address(this).balance >= valorComissao + valorParaOng, "Contrato com saldo insuficiente para taxas");
-
-        // Transferir taxas
-        (bool successComissao,) = payable(dono).call{value: valorComissao}("");
-        require(successComissao, "Falha na transferencia da comissao");
-
-        if (contaOng != address(0) && valorParaOng > 0) {
-            (bool successOng,) = payable(contaOng).call{value: valorParaOng}("");
-            require(successOng, "Falha na transferencia para ONG");
-        }
-
-        emit PagamentoRecebido(
-            usuarioDestino,
-            msg.sender,
-            valor,
-            valorLiquido,
-            valorComissao,
-            valorParaOng,
-            block.timestamp,
-            referenciaPix,
-            nomeCliente,
-            emailCliente
-        );
-
-        emit pagamentoRealizado(msg.sender, valor, referenciaPix);
-    }
-
-    // Sistema de transferência direta de ETH (sem saldo interno)
+    // Transferência P2P com taxas usando ETH direto
     function transferirETHDireto(
         string memory referenciaPix,
         address payable usuarioDestino
@@ -318,21 +236,26 @@ contract etherFlow {
         emit pagamentoRealizado(msg.sender, valorTotal, referenciaPix);
     }
 
-    // Transferência simples sem taxas (P2P puro)
+    // Transferência simples sem taxas (P2P puro) - MODIFICADA PARA NÃO DEPENDER DE REGISTRO
     function transferenciaSemTaxas(
         string memory referenciaPix,
         address payable usuarioDestino
-    ) public payable noReentrance apenasClienteRegistrado {
+    ) public payable noReentrance {
         require(usuarioDestino != address(0), "Endereco destino invalido");
         require(usuarioDestino != msg.sender, "Nao pode transferir para si mesmo");
         require(msg.value > 0, "Valor deve ser maior que zero");
         require(bytes(referenciaPix).length > 0, "Referencia PIX invalida");
-        require(clientes.ClienteRegistrado(usuarioDestino), "Usuario destino nao registrado");
 
         transacoesPorCliente[usuarioDestino]++;
 
-        string memory nomeCliente = clientes.getNomeCliente(msg.sender);
-        string memory emailCliente = clientes.getEmailCliente(msg.sender);
+        // Usar valores padrão se o cliente não estiver registrado
+        string memory nomeCliente = "Usuario nao registrado";
+        string memory emailCliente = "nao-informado@exemplo.com";
+
+        if (address(clientes) != address(0) && clientes.ClienteRegistrado(msg.sender)) {
+            nomeCliente = clientes.getNomeCliente(msg.sender);
+            emailCliente = clientes.getEmailCliente(msg.sender);
+        }
 
         Transacao memory novaTransacao = Transacao({
             clienteDestino: usuarioDestino,
@@ -369,10 +292,7 @@ contract etherFlow {
         emit pagamentoRealizado(msg.sender, msg.value, referenciaPix);
     }
 
-    function consultarSaldoInterno(address cliente) public view returns (uint256) {
-        return clientes.saldoCliente(cliente);
-    }
-
+    // Função de saldo interno removida - agora só consulta saldo ETH real
     function consultarSaldoETH(address cliente) public view returns (uint256) {
         return cliente.balance;
     }
@@ -418,24 +338,33 @@ contract etherFlow {
         return (valorComissao, valorOng);
     }
 
-    function doacaoDireta() public payable noReentrance apenasClienteRegistrado {
+    // Função para configurar ou alterar a ONG
+    function setContaOng(address _contaOng) external onlyDono {
+        require(_contaOng != address(0), "Endereco da ONG invalido");
+        contaOng = _contaOng;
+        emit mudarContaOng(_contaOng);
+    }
+
+    // Doação direta usando ETH enviado
+    function doacaoDireta() public payable noReentrance {
         require(msg.value > 0, "Voce deve enviar um valor maior do que zero");
         require(contaOng != address(0), "Conta da ONG nao configurada");
 
-        uint256 valorDoado = msg.value;
-        uint256 saldoAtual = clientes.saldoCliente(msg.sender);
-        require(saldoAtual >= valorDoado, "Saldo insuficiente para doacao");
+        string memory nomeDoador = "Doador anonimo";
+        string memory emailDoador = "anonimo@exemplo.com";
 
-        // Atualizar saldo do cliente
-        uint256 novoSaldo = saldoAtual - valorDoado;
-        clientes.atualizarSaldoCliente(msg.sender, novoSaldo);
+        if (address(clientes) != address(0) && clientes.ClienteRegistrado(msg.sender)) {
+            nomeDoador = clientes.getNomeCliente(msg.sender);
+            emailDoador = clientes.getEmailCliente(msg.sender);
+        }
 
-        string memory nomeDoador = clientes.getNomeCliente(msg.sender);
-        string memory emailDoador = clientes.getEmailCliente(msg.sender);
-
-        (bool success,) = payable(contaOng).call{value: valorDoado}("");
+        (bool success,) = payable(contaOng).call{value: msg.value}("");
         require(success, "Falha na transferencia da doacao");
 
-        emit doacaoRealizada(msg.sender, valorDoado, nomeDoador, emailDoador);
+        emit doacaoRealizada(msg.sender, msg.value, nomeDoador, emailDoador);
     }
+
+    // Função para permitir recebimento de ETH diretamente no contrato
+    receive() external payable {}
+    fallback() external payable {}
 }

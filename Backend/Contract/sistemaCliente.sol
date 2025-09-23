@@ -6,7 +6,6 @@ contract SistemaCliente {
     struct Cliente {
         address carteira;
         string nome;
-        uint256 saldo; // em Wei
         bool registrado;
         string referenciaPix;
         string email;
@@ -36,13 +35,11 @@ contract SistemaCliente {
         uint256 timestamp
     );
 
-    event TransferenciaSaldo(
+    event TransferenciaETH(
         address indexed origem,
         address indexed destino,
         uint256 valor
     );
-
-    event Saque(address indexed carteira, uint256 valor);
 
     // ========== Modifiers ==========
     modifier apenasClienteRegistrado() {
@@ -88,7 +85,6 @@ contract SistemaCliente {
         clientes[msg.sender] = Cliente({
             carteira: msg.sender,
             nome: nome,
-            saldo: 0,
             registrado: true,
             referenciaPix: _referenciaPix,
             email: email,
@@ -148,7 +144,6 @@ contract SistemaCliente {
         delete clientes[cliente];
     }
 
-
     function alterarSenha(string memory senhaAtual, string memory novaSenha)
         public
         apenasClienteRegistrado
@@ -169,11 +164,6 @@ contract SistemaCliente {
         return pixCliente[_referenciaPix];
     }
 
-
-    function getEndereco(string memory referenciaPix) public view returns (address) {
-        return pixCliente[referenciaPix];
-    }
-
     // ========== Info de cliente ==========
     function mostraInfoClienteEmail(string memory email)
         public
@@ -183,46 +173,39 @@ contract SistemaCliente {
         address clienteAddress = emailCliente[email];
         require(clienteAddress != address(0), "Cliente nao encontrado para esse email");
         Cliente memory c = clientes[clienteAddress];
-        return (c.carteira, c.nome, c.saldo, c.registrado, c.referenciaPix);
+        // Retorna saldo ETH real da wallet em vez de saldo interno
+        return (c.carteira, c.nome, c.carteira.balance, c.registrado, c.referenciaPix);
     }
 
-    function mostraInfoCliente(address cliente)
+    function mostraInfoCliente(string memory referenciaPix)
         public
         view
         returns (address, string memory, uint256, bool, string memory, string memory)
     {
-        Cliente memory c = clientes[cliente];
-        return (c.carteira, c.nome, c.saldo, c.registrado, c.referenciaPix, c.email);
-    }
+        address clienteAddr = pixCliente[referenciaPix];
+        require(clienteAddr != address(0), "Cliente nao encontrado para esse referenciaPix");
 
-    function mostraInfoClientePix(string memory referenciaPix)
-        public
-        view
-        returns (address, string memory, uint256, bool, string memory)
-    {
-        address clienteAddress = pixCliente[referenciaPix];
-        require(clienteAddress != address(0), "Cliente nao encontrado para essa referencia Pix");
-        Cliente memory c = clientes[clienteAddress];
-        // Corrigido: retorna a referenciaPix (nao o email)
-        return (c.carteira, c.nome, c.saldo, c.registrado, c.referenciaPix);
+        Cliente memory c = clientes[clienteAddr];
+        // Retorna saldo ETH real da wallet em vez de saldo interno
+        return (c.carteira, c.nome, c.carteira.balance, c.registrado, c.referenciaPix, c.email);
     }
 
     function ClienteRegistrado(address cliente) public view returns (bool) {
         return clientes[cliente].registrado;
     }
 
-    function getNomeCliente(string memory referenciaPix) public view returns (string memory) {
-        address cliente = pixCliente[referenciaPix];                         // pega o endereço pelo PIX
-        require(cliente != address(0), "Cliente nao encontrado para esse referenciaPix");
-        return clientes[cliente].nome;                                       // retorna o nome
+    function getNomeCliente(address cliente) public view returns (string memory) {
+        require(clientes[cliente].registrado, "Cliente nao registrado!");
+        return clientes[cliente].nome;
     }
 
-
     function getEmailCliente(address cliente) public view returns (string memory) {
+        require(clientes[cliente].registrado, "Cliente nao registrado!");
         return clientes[cliente].email;
     }
 
     function getReferenciaPixCliente(address cliente) public view returns (string memory) {
+        require(clientes[cliente].registrado, "Cliente nao registrado!");
         return clientes[cliente].referenciaPix;
     }
 
@@ -230,78 +213,64 @@ contract SistemaCliente {
         return emailCliente[email];
     }
 
-    // saldo de qualquer cliente (para UI)
+    // Consulta saldo ETH real da wallet (não mais saldo interno)
     function saldoCliente(address cliente) external view returns (uint256) {
         require(clientes[cliente].registrado, "Cliente nao registrado!");
-        return clientes[cliente].saldo;
+        return cliente.balance;
     }
 
-    // deposito de ETH para saldo interno
-    function depositarSaldo() public payable apenasClienteRegistrado {
-        require(msg.value > 0, "Valor precisa ser maior que zero");
-        clientes[msg.sender].saldo += msg.value;
-    }
-
-    // saque de ETH do saldo interno
-    function sacarSaldo(uint256 valorWei) public apenasClienteRegistrado {
-        require(valorWei > 0, "Valor precisa ser maior que zero");
-        require(clientes[msg.sender].saldo >= valorWei, "Saldo insuficiente");
-        // effects
-        clientes[msg.sender].saldo -= valorWei;
-        // interaction
-        (bool ok, ) = payable(msg.sender).call{value: valorWei}("");
-        require(ok, "Falha ao enviar ETH");
-        emit Saque(msg.sender, valorWei);
-    }
-
-    function sacarTudo() public apenasClienteRegistrado {
-        uint256 valor = clientes[msg.sender].saldo;
-        require(valor > 0, "Sem saldo a sacar");
-        clientes[msg.sender].saldo = 0;
-        (bool ok, ) = payable(msg.sender).call{value: valor}("");
-        require(ok, "Falha ao enviar ETH");
-        emit Saque(msg.sender, valor);
-    }
-
-    // transferencia de saldo interno entre clientes
-    function transferirSaldo(
-        string memory _referenciaPix_origem,
-        string memory _referenciaPix_destino,
-        uint256 _valor
-    ) public {
-        address endereco_origem = pixCliente[_referenciaPix_origem];
-        address endereco_destino = pixCliente[_referenciaPix_destino];
-
-        require(endereco_origem != address(0), "Cliente origem nao encontrado");
-        require(endereco_destino != address(0), "Cliente destino nao encontrado");
-        require(msg.sender == endereco_origem, "Apenas o proprietario pode transferir");
-        require(clientes[endereco_origem].saldo >= _valor, "Saldo insuficiente");
-
-        clientes[endereco_origem].saldo -= _valor;
-        clientes[endereco_destino].saldo += _valor;
-
-        emit TransferenciaSaldo(endereco_origem, endereco_destino, _valor);
-    }
-
-    // consulta saldo por referencia PIX
+    // Consulta saldo ETH real por referencia PIX
     function consultarSaldo(string memory _referenciaPix) public view returns (uint256) {
         address endereco = pixCliente[_referenciaPix];
         require(endereco != address(0), "Cliente nao encontrado");
-        return clientes[endereco].saldo;
+        return endereco.balance;
     }
 
-    // ===== ajuste operacional protegido (use com cautela) =====
-    function atualizarSaldoCliente(address cliente, uint256 novoSaldo) external apenasDono {
-        require(clientes[cliente].registrado, "Cliente nao registrado!");
-        clientes[cliente].saldo = novoSaldo;
+    // Transferencia ETH direta entre wallets (P2P puro)
+    function transferirETHDireto(
+        string memory _referenciaPix_destino,
+        uint256 _valor
+    ) public payable apenasClienteRegistrado {
+        require(msg.value > 0, "Valor deve ser maior que zero");
+        require(msg.value >= _valor, "ETH enviado insuficiente");
+
+        address endereco_destino = pixCliente[_referenciaPix_destino];
+        require(endereco_destino != address(0), "Cliente destino nao encontrado");
+        require(endereco_destino != msg.sender, "Nao pode transferir para si mesmo");
+
+        // Transferir ETH diretamente para a wallet de destino
+        (bool success, ) = payable(endereco_destino).call{value: _valor}("");
+        require(success, "Falha na transferencia de ETH");
+
+        // Retornar troco se houver
+        uint256 troco = msg.value - _valor;
+        if (troco > 0) {
+            (bool successTroco, ) = payable(msg.sender).call{value: troco}("");
+            require(successTroco, "Falha ao retornar troco");
+        }
+
+        emit TransferenciaETH(msg.sender, endereco_destino, _valor);
     }
 
-    // ===== Segurança extra: permitir atualizar dono se precisar =====
+    // Função auxiliar para verificar se um endereço tem saldo suficiente
+    function temSaldoSuficiente(address cliente, uint256 valor) external view returns (bool) {
+        return cliente.balance >= valor;
+    }
+
+    // Transferir propriedade do contrato
     function transferirPropriedade(address novoDono) external apenasDono {
         require(novoDono != address(0), "Endereco invalido");
         dono = novoDono;
     }
 
-    // O contrato pode receber ETH (por segurança, nao credita automaticamente)
+    // Função para emergências - retirar ETH que possa ter ficado preso no contrato
+    function sacarETHContrato(uint256 valor) external apenasDono {
+        require(address(this).balance >= valor, "Saldo insuficiente no contrato");
+        (bool success, ) = payable(dono).call{value: valor}("");
+        require(success, "Falha ao sacar ETH do contrato");
+    }
+
+    // O contrato pode receber ETH
     receive() external payable {}
+    fallback() external payable {}
 }

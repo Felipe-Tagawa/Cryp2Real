@@ -6,7 +6,7 @@ import os
 import json
 from PIL import Image
 
-# CONFIGURAÇÃO CORRIGIDA
+# CONFIGURAÇÃO BASE
 GANACHE_INITIAL_BALANCE = 200
 BALANCE_TOLERANCE = 50
 
@@ -25,10 +25,14 @@ GANACHE_PRIVATE_KEYS = {
     13: "0x0dfd6c0be889a4c6ca773d45e036c8edeabfedcac1e1c858b7955aeea36ff84d",
     14: "0xe519b9b9c8ee1d7d80cc4b463c101a666fd6d9aa6890713741716e5b5bcb953e",
     15: "0x16e54c0ca8894085d6dc5ee3f227e48bc613a496a2cb655ddb42217a1de3c0a0",
+    16: "0x5ee8a8a5868d42fbfc8b19fd2c892b66e0596155feaa6632296d38347703ccb2",
+    17: "0x503623b7131c4f82abf4e9b09403a0ad92ccf95c4cdf6389b8a889b0254d2e7d",
+    18: "0xd1665777aa855cf053a3f6a68c2f4791f3d467147eb0083824ea5616e46b9027",
+    19: "0x070e37f5fefda600800308131b1790bccbb218fbeed05e71e513ec24e19e4e0c",
+    20: "0xe67eda8a535e32f3d5fd8eeee1d76f4d936d414ce6d4634114dbfb45103e7b40"
 }
 
 ACCOUNTS_CONTROL_FILE = "accounts_control.json"
-
 
 def load_accounts_control():
     """Carrega o controle de contas usadas"""
@@ -76,7 +80,7 @@ def reset_accounts_control():
         owner_account = w3.eth.accounts[0]
 
         # Lista de contas que você quer remover
-        ganache_accounts = w3.eth.accounts[3:16]
+        ganache_accounts = w3.eth.accounts[3:21]
 
         for cliente in ganache_accounts:
             # verifica se o cliente está registrado
@@ -103,7 +107,6 @@ def reset_accounts_control():
 def check_account_significantly_used(account_address):
     """
     Verifica se a conta foi significativamente usada
-    CORRIGIDO: Usa 200 ETH como base e tolerância apropriada
     """
     try:
         current_balance = w3.from_wei(w3.eth.get_balance(account_address), 'ether')
@@ -120,66 +123,56 @@ def check_account_significantly_used(account_address):
 
 
 def getGanacheAccount():
-    """
-    VERSÃO ATÔMICA + VERIFICAÇÃO NO CONTRATO:
-    Só persiste se tudo terminar bem e pula contas já registradas no contrato
-    """
-    next_index, used_accounts = load_accounts_control()
 
-    print(f"🔍 Procurando conta disponível...")
-    print(f"   Chaves privadas disponíveis: {list(GANACHE_PRIVATE_KEYS.keys())}")
+    next_index, used_accounts = load_accounts_control()
+    print(f"🔍 Procurando conta disponível (DEBUG)...")
+    print(f"   Próximo índice no controle: {next_index}")
+    print(f"   Contas já usadas: {used_accounts}")
 
     available_accounts = sorted(GANACHE_PRIVATE_KEYS.keys())
-    temp_used_accounts = used_accounts.copy()  # cópia em memória para atomicidade
-    try:
-        for account_index in available_accounts:
-            if account_index >= len(w3.eth.accounts):
-                print(f"   ❌ Conta {account_index} não existe no Ganache")
-                continue
+    temp_used_accounts = used_accounts.copy()
 
-            account_address = w3.eth.accounts[account_index]
-            private_key = GANACHE_PRIVATE_KEYS[account_index]
+    for account_index in available_accounts:
+        if account_index >= len(w3.eth.accounts):
+            print(f"   ❌ Conta {account_index} não existe no Ganache")
+            continue
 
-            if account_address in temp_used_accounts:
-                print(f"   ❌ Conta {account_index} já marcada como usada")
-                continue
+        account_address = w3.eth.accounts[account_index]
+        private_key = GANACHE_PRIVATE_KEYS[account_index]
 
-            # 🔍 Verificação no contrato
-            try:
-                ja_cadastrado = sistema_cliente.functions.ClienteRegistrado(account_address).call()
-                if ja_cadastrado:
-                    print(f"   ❌ Conta {account_index} já cadastrada no contrato")
-                    temp_used_accounts.append(account_address)
-                    continue
-            except Exception as e:
-                print(f"⚠️ Erro ao consultar contrato para {account_address}: {e}")
-                continue
+        print(f"\n📌 Testando conta {account_index} -> {account_address}")
 
-            # Verificação de saldo
-            is_used, current_balance, difference = check_account_significantly_used(account_address)
-            if is_used:
-                print(f"   ❌ Conta {account_index}: {current_balance:.6f} ETH (diferença: {difference:.6f}) - MUITO USADA")
+        if account_address in temp_used_accounts:
+            print(f"   ❌ Conta já marcada como usada no controle")
+            continue
+
+        # 🔍 Verificação no contrato
+        try:
+            ja_cadastrado = sistema_cliente.functions.ClienteRegistrado(account_address).call()
+            print(f"   - Cliente registrado no contrato? {ja_cadastrado}")
+            if ja_cadastrado:
                 temp_used_accounts.append(account_address)
                 continue
+        except Exception as e:
+            print(f"⚠️ Erro ao consultar contrato para {account_address}: {e}")
+            continue
 
-            # ✅ Conta disponível encontrada
-            print(f"   ✅ Conta {account_index} DISPONÍVEL: {current_balance:.6f} ETH (diferença: {difference:.6f})")
-            print(f"   📍 Endereço: {account_address}")
-            # Marca em memória
+        # Verificação de saldo
+        is_used, current_balance, difference = check_account_significantly_used(account_address)
+        print(f"   - Saldo atual: {current_balance:.6f} ETH, diferença: {difference:.6f}, usado? {is_used}")
+        if is_used:
             temp_used_accounts.append(account_address)
+            continue
 
-            # Só agora persiste no disco → atomicidade garantida
-            save_accounts_control(account_index + 1, temp_used_accounts)
-
-            return account_address, private_key
-
-    except Exception as e:
-        print(f"⚠️ Erro inesperado em getGanacheAccount: {e}")
-        return None, None
+        # ✅ Conta disponível encontrada
+        print(f"   ✅ Conta DISPONÍVEL! Marcando como usada e salvando controle")
+        temp_used_accounts.append(account_address)
+        save_accounts_control(account_index + 1, temp_used_accounts)
+        return account_address, private_key
 
     print("❌ NENHUMA CONTA DISPONÍVEL!")
-    print("💡 Opções: Reinicie Ganache, rode reset_accounts_control(), ou adicione mais chaves")
     return None, None
+
 
 
 def list_account_status_detailed():
@@ -355,6 +348,20 @@ def listAllAccounts():
     for conta in w3.eth.accounts:
         saldo = w3.from_wei(w3.eth.get_balance(conta), 'ether')
         print(conta, saldo)
+
+def calcular_projecao(investimento_inicial_eth):
+
+    # Projeção de 30 dias com um crescimento de 5%
+    taxa_de_crescimento_mensal = 0.05
+    projecao_30_dias_eth = investimento_inicial_eth * (1 + taxa_de_crescimento_mensal)
+
+    # Projeção de 1 ano com um crescimento de 5% ao mês (composto)
+    projecao_1_ano_eth = investimento_inicial_eth * (1 + taxa_de_crescimento_mensal)**12
+
+    return {
+        "projecao_30_dias_eth": projecao_30_dias_eth,
+        "projecao_1_ano_eth": projecao_1_ano_eth
+    }
 
 
 if __name__ == "__main__":
