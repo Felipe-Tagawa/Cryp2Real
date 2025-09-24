@@ -1,10 +1,13 @@
 # Funções auxiliares
+import base64
+
 from Backend.my_blockchain import w3, sistema_cliente, PRIVATE_KEY
 import requests
 import qrcode
 import os
 import json
 from PIL import Image
+from io import BytesIO
 
 # CONFIGURAÇÃO BASE
 GANACHE_INITIAL_BALANCE = 200
@@ -335,12 +338,60 @@ def extract_interface(compiled_contracts, contract_name):
     return interface["abi"], interface["bin"]
 
 
+import requests
+
+
 def get_eth_to_brl():
-    url = "https://api.coingecko.com/api/v3/simple/price"
-    params = {"ids": "ethereum", "vs_currencies": "brl"}
-    response = requests.get(url, params=params)
-    data = response.json()
-    return data["ethereum"]["brl"]
+    """
+    Busca a cotação ETH/BRL com fallback robusto em duas fontes.
+
+    Returns:
+        float: Cotação ETH em BRL ou valor padrão em caso de erro.
+    """
+    # Valor padrão de segurança
+    fallback_value = 23500.0
+
+    # --- 1) CoinGecko ---
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {"ids": "ethereum", "vs_currencies": "brl"}
+        response = requests.get(url, params=params, timeout=10)
+
+        print("➡️ URL chamada CoinGecko:", response.url)
+
+        if response.status_code == 200:
+            data = response.json()
+            price = data.get("ethereum", {}).get("brl")
+            if isinstance(price, (int, float)) and price > 0:
+                print(f"✅ Cotação ETH/BRL obtida da CoinGecko: R$ {price:,.2f}")
+                return float(price)
+        else:
+            print(f"❌ CoinGecko retornou status {response.status_code}")
+    except Exception as e:
+        print(f"⚠️ Erro CoinGecko: {str(e)}")
+
+    # --- 2) CryptoCompare ---
+    try:
+        url = "https://min-api.cryptocompare.com/data/price"
+        params = {"fsym": "ETH", "tsyms": "BRL"}
+        response = requests.get(url, params=params, timeout=10)
+
+        print("➡️ URL chamada CryptoCompare:", response.url)
+
+        if response.status_code == 200:
+            data = response.json()
+            price = data.get("BRL")
+            if isinstance(price, (int, float)) and price > 0:
+                print(f"✅ Cotação ETH/BRL obtida da CryptoCompare: R$ {price:,.2f}")
+                return float(price)
+        else:
+            print(f"❌ CryptoCompare retornou status {response.status_code}")
+    except Exception as e:
+        print(f"⚠️ Erro CryptoCompare: {str(e)}")
+
+    # --- 3) Fallback fixo ---
+    print(f"⚠️ Usando valor fallback: R$ {fallback_value:,.2f}")
+    return fallback_value
 
 
 def listAllAccounts():
@@ -362,6 +413,30 @@ def calcular_projecao(investimento_inicial_eth):
         "projecao_30_dias_eth": projecao_30_dias_eth,
         "projecao_1_ano_eth": projecao_1_ano_eth
     }
+
+def gerar_qr_comprovante(receipt_json, tx_id):
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=6,
+        border=4,
+    )
+    qr.add_data(json.dumps(receipt_json, ensure_ascii=False))
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    # Salvar como arquivo
+    pasta = "static/qrs"
+    os.makedirs(pasta, exist_ok=True)
+    caminho = os.path.join(pasta, f"comprovante_{tx_id}.png")
+    img.save(caminho)
+
+    # Também retornar em base64 (para front consumir diretamente)
+    bio = BytesIO()
+    img.save(bio, format="PNG")
+    b64 = base64.b64encode(bio.getvalue()).decode("utf-8")
+
+    return f"data:image/png;base64,{b64}", caminho
 
 
 if __name__ == "__main__":

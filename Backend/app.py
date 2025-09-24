@@ -4,18 +4,17 @@ import os
 import secrets
 import traceback
 from datetime import datetime, timezone
+
 from dotenv import load_dotenv
 
 from flask import Flask, jsonify, request, session, Response
-from flask import send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from matplotlib import pyplot as plt
 from sqlalchemy import text
 
 from Backend.my_blockchain import w3, etherFlow, sistema_cliente, PRIVATE_KEY, admWallet, ongWallet
-from Backend.qr_service import QRCodeService
-from Backend.utils import sign_n_send, get_eth_to_brl, getGanacheAccount, calcular_projecao
+from Backend.utils import sign_n_send, get_eth_to_brl, getGanacheAccount, calcular_projecao, gerar_qr_comprovante
 
 load_dotenv()
 
@@ -77,9 +76,17 @@ class Transacao(db.Model):
         return f'<Transacao {self.id}: R${self.valor_pagamento} para {self.beneficiado}>'
 
 
+api_cache = {}
+api_locks = {}
+CACHE_DURATION = 2  # segundos
+
+
+
+
 @app.route('/')
 def run():
     return 'API funcionando com sucesso!'
+
 
 @app.route("/test-db")
 def test_db():
@@ -89,6 +96,7 @@ def test_db():
         return "Conexão com banco OK!"
     except Exception as e:
         return f"Erro na conexão: {str(e)}"
+
 
 @app.route("/test-ganache")
 def test_ganache():
@@ -103,6 +111,7 @@ def test_ganache():
             return {"status": "desconectado"}, 500
     except Exception as e:
         return {"status": "erro", "mensagem": str(e)}, 500
+
 
 @app.route("/registrarCliente", methods=["POST"])
 def registro_cliente():
@@ -229,6 +238,7 @@ def registro_cliente():
         return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
 
 
+
 @app.route("/cliente_registrado", methods=["GET"])
 def cliente_registrado():
 
@@ -258,6 +268,7 @@ def cliente_registrado():
         })
     except Exception as e:
         return jsonify({"erro": f"Erro ao verificar registro: {str(e)}"}), 500
+
 
 
 @app.route("/mostraInfoCliente", methods=["GET"])
@@ -314,6 +325,7 @@ def mostraInfoCliente():
         return jsonify({"erro": f"Erro ao buscar informações do cliente: {str(e)}"}), 500
 
 
+
 @app.route("/getName", methods=["GET"])
 def getName():
     """
@@ -368,6 +380,7 @@ def getName():
         return jsonify({"erro": f"Erro interno ao buscar cliente: {str(e)}"}), 500
 
 
+
 @app.route("/getBalance", methods=["GET"])
 def getBalance():
     """
@@ -394,8 +407,14 @@ def getBalance():
                 500: Erro interno.
         """
 
+
     try:
+
         referencia_pix = request.args.get('referenciaPix')
+
+        # Add debugging
+        print(f"🔍 DEBUG - referencia_pix: {referencia_pix}")
+        print(f"🔍 DEBUG - session contents: {dict(session)}")
 
         if referencia_pix:
             cliente = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
@@ -403,6 +422,7 @@ def getBalance():
                 return jsonify({"erro": "Cliente não encontrado"}), 404
         else:
             cliente_id = session.get("cliente_id")
+            print(f"🔍 DEBUG - session cliente_id: {cliente_id}")
             if not cliente_id:
                 return jsonify({"erro": "referenciaPix obrigatória na query string ou sessão válida"}), 400
             cliente = Cliente.query.get(cliente_id)
@@ -416,10 +436,8 @@ def getBalance():
         saldo_eth = w3.from_wei(saldo_wei, "ether")
 
         # Conversão 1 ETH = 1 BRL para simplicidade (ou use get_eth_to_brl())
-        try:
-            cotacao_eth_brl = get_eth_to_brl()
-        except:
-            cotacao_eth_brl = 1.0  # Fallback
+        cotacao_eth_brl = get_eth_to_brl()  # Agora sempre retorna um valor válido
+        print(f"🔍 Cotação obtida: R$ {cotacao_eth_brl:,.2f}")
 
         saldo_brl = float(saldo_eth) * cotacao_eth_brl
 
@@ -441,182 +459,8 @@ def getBalance():
         return jsonify({"erro": f"Erro interno ao buscar saldo: {str(e)}"}), 500
 
 
-@app.route("/realizaPagamento", methods=["POST"])
-def realizaPagamento():
-    """
-        Realiza um pagamento de um cliente para um comerciante.
-
-        Args:
-            JSON (dict): Body da requisição contendo:
-                - valor_reais (float): Valor em reais (BRL).
-                - referenciaPix (str): Chave Pix do cliente.
-                - comerciante (str): Endereço Ethereum do comerciante.
-                - descricao (str, opcional): Descrição do pagamento.
-
-        Returns:
-            flask.Response: JSON contendo:
-                - status (str).
-                - valor_reais (float), valor_eth (float), valor_wei (int).
-                - transaction_hash (str).
-                - gas_usado (int).
-                - descricao (str).
-                - beneficiado (str).
-                - comerciante (str).
-            Erros:
-                400: Dados inválidos ou saldo insuficiente.
-                500: Erro interno.
-        """
-    data = request.get_json()
-    if not data:
-        return jsonify({"erro": "Dados JSON não fornecidos"}), 400
-
-    # Validar campos obrigatórios
-    required_fields = ['valor_reais', 'referenciaPix', 'comerciante']
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"erro": f"Campo '{field}' é obrigatório"}), 400
-
-    valor_reais = data['valor_reais']
-    referenciaPix = data['referenciaPix']
-    comerciante_raw = data['comerciante']
-    descricao = data.get('descricao', '')
-
-    # Validações
-    try:
-        valor_reais = float(valor_reais)
-        if valor_reais <= 0:
-            return jsonify({"erro": "Valor deve ser maior que zero"}), 400
-    except (ValueError, TypeError):
-        return jsonify({"erro": "Valor inválido. Deve ser um número positivo"}), 400
-
-    try:
-        comerciante = w3.to_checksum_address(comerciante_raw)
-    except ValueError:
-        return jsonify({"erro": "Endereço do comerciante inválido"}), 400
-
-    # Buscar cliente na blockchain e banco
-    try:
-        endereco_cliente = sistema_cliente.functions.getEnderecoPorPix(referenciaPix).call()
-        if not w3.is_address(endereco_cliente) or endereco_cliente == "0x0000000000000000000000000000000000000000":
-            return jsonify({"erro": "Cliente não registrado com essa referência Pix"}), 400
-
-        cliente_db = Cliente.query.filter_by(referenciaPix=referenciaPix).first()
-        if not cliente_db:
-            return jsonify({"erro": "Cliente não encontrado no banco de dados"}), 400
-    except Exception as e:
-        return jsonify({"erro": f"Erro ao buscar cliente: {str(e)}"}), 500
-
-    # Converter valor para ETH
-    try:
-        eth_brl = get_eth_to_brl()
-        valor_eth = valor_reais / eth_brl
-        valor_wei = w3.to_wei(valor_eth, 'ether')
-    except Exception as e:
-        return jsonify({"erro": f"Erro ao obter cotação ETH: {str(e)}"}), 500
-
-    # Verificar saldo
-    try:
-        saldo_cliente = w3.eth.get_balance(endereco_cliente)
-        if saldo_cliente < valor_wei:
-            return jsonify({
-                "erro": "Saldo ETH insuficiente",
-                "saldo_atual_eth": float(w3.from_wei(saldo_cliente, 'ether')),
-                "valor_necessario_eth": valor_eth
-            }), 400
-    except Exception as e:
-        return jsonify({"erro": f"Erro ao verificar saldo: {str(e)}"}), 500
-
-    # Construir transação
-    try:
-        nonce = w3.eth.get_transaction_count(endereco_cliente)
-
-        # Usar a função modificada que aceita ETH enviado
-        transaction = etherFlow.functions.realizaPagamentoCliente(
-            valor_wei, referenciaPix, comerciante
-        ).build_transaction({
-            "from": endereco_cliente,
-            "nonce": nonce,
-            "gasPrice": w3.eth.gas_price,
-            "value": valor_wei,  # Enviar ETH junto
-            "gas": 500000
-        })
-    except ValueError as e:
-        if "revert" in str(e).lower():
-            return jsonify({"erro": "Transação rejeitada pelo contrato. Verifique os dados e saldo."}), 400
-        else:
-            return jsonify({"erro": f"Erro ao construir transação: {str(e)}"}), 400
-    except Exception as e:
-        return jsonify({"erro": f"Erro inesperado ao construir transação: {str(e)}"}), 500
-
-    # Enviar transação
-    try:
-        receipt = sign_n_send(transaction, cliente_db.private_key)
-    except ValueError as e:
-        return jsonify({"erro": f"Transação rejeitada pela blockchain: {str(e)}"}), 400
-    except Exception as e:
-        return jsonify({"erro": f"Erro ao enviar transação: {str(e)}"}), 500
-
-    # Registrar no banco
-    try:
-        nova_transacao = Transacao(
-            valor_pagamento=valor_reais,
-            descricao=descricao if descricao else "Pagamento para comerciante",
-            beneficiado="Comerciante",
-            hash_transacao=receipt["transactionHash"].hex(),
-            cliente_id=cliente_db.id,
-            tipo_transacao="PAGAMENTO"
-        )
-
-        db.session.add(nova_transacao)
-        db.session.commit()
-
-    except Exception as e:
-        print(f"Erro ao registrar transação no BD: {str(e)}")
-        db.session.rollback()
-
-    return jsonify({
-        "status": "sucesso",
-        "valor_reais": valor_reais,
-        "valor_eth": round(valor_eth, 8),
-        "valor_wei": int(valor_wei),
-        "transaction_hash": receipt["transactionHash"].hex(),
-        "gas_usado": receipt.get("gasUsed", 0),
-        "descricao": descricao,
-        "beneficiado": "Comerciante",
-        "comerciante": comerciante
-    })
-
-
 @app.route("/transferirEntreUsers", methods=["POST"])
 def transferirEntreUsers():
-    """
-        Realiza transferência de ETH entre usuários cadastrados.
-
-        Args:
-            JSON (dict): Body da requisição contendo:
-                - referencia_origem (str).
-                - referencia_destino (str).
-                - tipo_transferencia (str): "eth_direto" ou "sem_taxas".
-                - valor_eth (float): Quantidade em ETH.
-                - descricao (str, opcional).
-
-        Returns:
-            flask.Response: JSON contendo:
-                - status (str).
-                - tipo_transferencia (str).
-                - valor_reais (float), valor_eth (float), valor_wei (int).
-                - transaction_hash (str).
-                - gas_usado (int).
-                - descricao (str).
-                - beneficiado (str).
-                - origem (dict): Referência e endereço.
-                - destino (dict): Referência e endereço.
-            Erros:
-                400: Dados inválidos ou saldo insuficiente.
-                500: Erro interno.
-        """
-
-    global valor_reais
     data = request.get_json()
     if not data:
         return jsonify({"erro": "Dados JSON não fornecidos"}), 400
@@ -624,13 +468,21 @@ def transferirEntreUsers():
     # Campos obrigatórios
     required_fields = ['referencia_origem', 'referencia_destino', 'tipo_transferencia', 'valor_eth']
     for field in required_fields:
-        if field not in data:
+        if field not in data or data[field] is None:  # Adicionar verificação None
             return jsonify({"erro": f"Campo '{field}' é obrigatório"}), 400
 
     referencia_origem = data['referencia_origem']
     referencia_destino = data['referencia_destino']
-    tipo_transferencia = data['tipo_transferencia']  # 'eth_direto' ou 'sem_taxas'
-    valor_eth = float(data['valor_eth'])
+    tipo_transferencia = data['tipo_transferencia']
+
+    # Validação mais robusta para valor_eth
+    try:
+        valor_eth = float(data['valor_eth'])
+        if valor_eth <= 0:
+            return jsonify({"erro": "Valor deve ser maior que zero"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"erro": "valor_eth deve ser um número válido"}), 400
+
     valor_wei = w3.to_wei(valor_eth, 'ether')
     descricao = data.get('descricao', '')
 
@@ -657,7 +509,7 @@ def transferirEntreUsers():
     # Verificar saldo
     try:
         saldo_origem = w3.eth.get_balance(endereco_origem)
-        gas_estimate = 300000  # Estimativa conservadora
+        gas_estimate = 300000
         gas_cost = gas_estimate * w3.eth.gas_price
         total_necessario = valor_wei + gas_cost
 
@@ -677,7 +529,6 @@ def transferirEntreUsers():
         nonce = w3.eth.get_transaction_count(endereco_origem)
 
         if tipo_transferencia == 'eth_direto':
-            # Transferência com taxas
             transaction = etherFlow.functions.transferirETHDireto(
                 referencia_origem,
                 w3.to_checksum_address(endereco_destino)
@@ -689,7 +540,6 @@ def transferirEntreUsers():
                 "gas": 400000
             })
         elif tipo_transferencia == 'sem_taxas':
-            # Transferência P2P pura sem taxas
             transaction = etherFlow.functions.transferenciaSemTaxas(
                 referencia_origem,
                 w3.to_checksum_address(endereco_destino)
@@ -723,9 +573,15 @@ def transferirEntreUsers():
     except Exception as e:
         return jsonify({"erro": f"Erro ao enviar transação: {str(e)}"}), 500
 
-    # Registrar no banco
+    # Registrar no banco com tratamento de erro melhorado
     try:
-        eth_brl = get_eth_to_brl()
+        # Usar cotação fixa ou obter do get_eth_to_brl com fallback
+        try:
+            eth_brl = get_eth_to_brl()
+        except Exception as cotacao_error:
+            print(f"Erro ao obter cotação, usando 1:1: {cotacao_error}")
+            eth_brl = 1.0  # Fallback para cotação 1:1
+
         valor_reais = valor_eth * eth_brl
 
         # Registro remetente
@@ -753,14 +609,17 @@ def transferirEntreUsers():
             db.session.add(transacao_entrada)
 
         db.session.commit()
+        print("✅ Transações registradas no BD com sucesso")
+
     except Exception as e:
         db.session.rollback()
-        print(f"Erro ao registrar no BD: {str(e)}")
+        print(f"❌ Erro ao registrar no BD: {str(e)}")
+        # Não retornar erro aqui pois a transação blockchain já foi feita
 
     return jsonify({
         "status": "sucesso",
         "tipo_transferencia": tipo_transferencia,
-        "valor_reais": round(valor_reais, 2),
+        "valor_reais": round(valor_reais, 2) if 'valor_reais' in locals() else valor_eth,
         "valor_eth": valor_eth,
         "valor_wei": int(valor_wei),
         "transaction_hash": receipt["transactionHash"].hex(),
@@ -776,6 +635,7 @@ def transferirEntreUsers():
             "endereco": endereco_destino
         }
     })
+
 
 
 @app.route("/getTransacoesCliente", methods=["GET"])
@@ -845,6 +705,7 @@ signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
 tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 conta_ong = etherFlow.functions.contaOng().call()
 print("Endereço da ONG configurado:", conta_ong)
+
 
 @app.route("/donate", methods=["POST"])
 def donate():
@@ -954,6 +815,7 @@ def donate():
         return jsonify({"erro": f"Erro ao processar a doação: {str(e)}"}), 500
 
 
+
 @app.route("/ethereum_brl_mensal", methods=["GET"])
 def ethereum_brl_mensal():
     """
@@ -1000,27 +862,39 @@ def ethereum_brl_mensal():
         return {"error": str(e)}, 500
 
 
+
 @app.route("/currentETH", methods=["GET"])
 def getCurrentETH():
     """
-        Retorna a cotação atual do Ethereum em BRL.
-
-        Args:
-            Nenhum.
-
-        Returns:
-            flask.Response: JSON com:
-                - ethereum_brl (float).
-            Erros:
-                500: Erro interno ao buscar cotação.
-        """
-
+    Retorna a cotação atual do Ethereum em BRL.
+    Returns:
+        flask.Response: JSON com:
+            - ethereum_brl (float): Cotação atual
+            - fonte (str): Fonte dos dados
+            - timestamp (str): Timestamp da consulta
+        Erros:
+            Nunca retorna erro - sempre retorna um valor válido
+    """
     try:
-        price = get_eth_to_brl()
-        return jsonify({"ethereum_brl": price}), 200
+        price = get_eth_to_brl()  # Agora sempre retorna um valor válido
+
+        return jsonify({
+            "ethereum_brl": price,
+            "fonte": "coingecko_api" if price > 1000 else "fallback_value",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": "sucesso"
+        }), 200
+
     except Exception as e:
-        print(e)
-        return jsonify({"error": str(e)}), 500
+        # Este except nunca deveria ser acionado agora, mas mantemos por segurança
+        print(f"❌ Erro crítico em getCurrentETH: {str(e)}")
+        return jsonify({
+            "ethereum_brl": 23500.0,
+            "fonte": "emergency_fallback",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": "fallback",
+            "erro": str(e)
+        }), 200
 
 
 @app.route('/calcular_projecao', methods=['POST'])
@@ -1054,52 +928,59 @@ def projectionCalculate():
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
-# Inicializar o serviço de QR codes
-qr_service = QRCodeService()
+@app.route("/getUserData", methods=["GET"])
+def getUserData():
+    """
+    Endpoint combinado que retorna nome, saldo e dados do usuário em uma única chamada
+    Evita race conditions e multiple requests
+    """
+    try:
+        referencia_pix = request.args.get('referenciaPix')
 
-@app.route("/qrcode-registro")
-def criar_qrcode_registro():
-    """Gera QR code com degradê para registro"""
-    url = "https://cryp2real.flutterflow.app/register"
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+        # Buscar cliente
+        if referencia_pix:
+            cliente = Cliente.query.filter_by(referenciaPix=referencia_pix).first()
+            if not cliente:
+                return jsonify({"erro": "Cliente não encontrado"}), 404
+        else:
+            cliente_id = session.get("cliente_id")
+            if not cliente_id:
+                return jsonify({"erro": "Sessão inválida"}), 400
+            cliente = Cliente.query.get(cliente_id)
+            if not cliente:
+                return jsonify({"erro": "Cliente da sessão não encontrado"}), 404
 
-    # Gerar apenas o QR com degradê
-    caminho_relativo = qr_service.gerar_qr_degrade(url)
-    caminho_absoluto = qr_service.obter_caminho_absoluto(caminho_relativo, base_dir)
+        # Buscar saldo ETH
+        address = w3.to_checksum_address(cliente.carteira)
+        saldo_wei = w3.eth.get_balance(address)
+        saldo_eth = w3.from_wei(saldo_wei, "ether")
 
-    print(f"Enviando arquivo: {caminho_absoluto}")
-    return send_file(caminho_absoluto, mimetype='image/png')
+        # Buscar cotação (usando a função corrigida)
+        cotacao_eth_brl = get_eth_to_brl()
+        saldo_brl = float(saldo_eth) * cotacao_eth_brl
 
-@app.route("/qrcode-comerciante")
-def criar_qrcode_comerciante():
-    """Gera QR code padrão para chave do comerciante"""
-    chave_comerciante = "0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F"
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+        # Retornar todos os dados em uma única resposta
+        return jsonify({
+            "status": "sucesso",
+            "cliente": {
+                "id": cliente.id,
+                "nome": cliente.nome,
+                "email": cliente.email,
+                "referenciaPix": cliente.referenciaPix,
+                "carteira": address
+            },
+            "saldo": {
+                "balance_eth": float(saldo_eth),
+                "balance_brl": round(saldo_brl, 2),
+                "cotacao_eth_brl": cotacao_eth_brl
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }), 200
 
-    # Gerar QR padrão para a chave do comerciante
-    caminho_relativo = qr_service.gerar_qr_padrao(chave_comerciante, "comerciante_chave.png")
-    caminho_absoluto = qr_service.obter_caminho_absoluto(caminho_relativo, base_dir)
+    except Exception as e:
+        print(f"❌ Erro em getUserData: {str(e)}")
+        return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
 
-    print(f"Enviando QR da chave do comerciante: {caminho_absoluto}")
-    return send_file(caminho_absoluto, mimetype='image/png')
-
-@app.route("/gerar-qrcodes")
-def gerar_qrcodes():
-    """Gera os dois QR codes e confirma que foram salvos"""
-    url_registro = "https://cryp2real.flutterflow.app"
-    chave_comerciante = "0x5435f2DB7d42635225FbE2D9B356B693e1F53D2F"
-
-    # Gerar ambos os QR codes
-    caminhos = qr_service.gerar_qr_codes_completos(url_registro, chave_comerciante)
-
-    return {
-        "status": "sucesso",
-        "message": "QR codes gerados com sucesso!",
-        "arquivos": {
-            "registro": caminhos['registro'],
-            "comerciante": caminhos['comerciante']
-        }
-    }
 
 if __name__ == '__main__':
     with app.app_context():
