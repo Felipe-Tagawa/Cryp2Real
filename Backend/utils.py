@@ -6,12 +6,11 @@ import requests
 import qrcode
 import os
 import json
-from PIL import Image
 from io import BytesIO
 
 # CONFIGURAÇÃO BASE
 GANACHE_INITIAL_BALANCE = 200
-BALANCE_TOLERANCE = 50
+BALANCE_TOLERANCE = 150
 
 # Mapeamento das chaves privadas DISPONÍVEIS
 GANACHE_PRIVATE_KEYS = {
@@ -292,34 +291,6 @@ def salvar_qr(img, nome_arquivo):
     return caminho
 
 
-def qr_degrade(data):
-    qr = qrcode.make(data).convert("RGBA")
-    width, height = qr.size
-    gradient = Image.new("RGBA", qr.size)
-    for x in range(width):
-        for y in range(height):
-            r = int(255 * (x / width))
-            b = 255 - r
-            gradient.putpixel((x, y), (r, 0, b, 255))
-    pixels_qr = qr.load()
-    pixels_grad = gradient.load()
-    for x in range(width):
-        for y in range(height):
-            if pixels_qr[x, y][0] > 128:
-                pixels_grad[x, y] = (255, 255, 255, 0)
-    caminho = salvar_qr(gradient, "registro_degrade.png")
-    return caminho
-
-
-def qr_padrao(data, nome_arquivo):
-    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4)
-    qr.add_data(data)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    caminho = salvar_qr(img, nome_arquivo)
-    return caminho
-
-
 def sign_n_send(tx, private_key):
     signed_tx = w3.eth.account.sign_transaction(tx, private_key)
     tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
@@ -336,9 +307,6 @@ def extract_interface(compiled_contracts, contract_name):
     contract_id = f"<stdin>:{contract_name}"
     interface = compiled_contracts[contract_id]
     return interface["abi"], interface["bin"]
-
-
-import requests
 
 
 def get_eth_to_brl():
