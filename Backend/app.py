@@ -517,7 +517,7 @@ def transferirEntreUsers():
 
         try:
             nonce = w3.eth.get_transaction_count(endereco_origem)
-            if tipo_transferencia == 'eth_direto':
+            if tipo_transferencia == 'Padrão':
                 transaction = etherFlow.functions.transferirETHDireto(
                     referencia_origem,
                     w3.to_checksum_address(endereco_destino)
@@ -528,7 +528,7 @@ def transferirEntreUsers():
                     "value": valor_wei,
                     "gas": 400000
                 })
-            elif tipo_transferencia == 'sem_taxas':
+            elif tipo_transferencia == 'Solidária':
                 transaction = etherFlow.functions.transferenciaSemTaxas(
                     referencia_origem,
                     w3.to_checksum_address(endereco_destino)
@@ -540,7 +540,7 @@ def transferirEntreUsers():
                     "gas": 300000
                 })
             else:
-                return jsonify({"erro": "Tipo de transferência inválido. Use: 'eth_direto' ou 'sem_taxas'"}), 400
+                return jsonify({"erro": "Tipo de transferência inválido. Use: 'Padrão' ou 'Solidária'"}), 400
         except ValueError as e:
             if "revert" in str(e).lower():
                 return jsonify({
