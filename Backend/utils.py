@@ -1,35 +1,67 @@
 # Funções auxiliares
+import base64
+
 from Backend.my_blockchain import w3, sistema_cliente, PRIVATE_KEY
 import requests
 import qrcode
 import os
 import json
-from PIL import Image
+from io import BytesIO
 
 # CONFIGURAÇÃO BASE
 GANACHE_INITIAL_BALANCE = 200
-BALANCE_TOLERANCE = 50
+BALANCE_TOLERANCE = 199
 
 # Mapeamento das chaves privadas DISPONÍVEIS
 GANACHE_PRIVATE_KEYS = {
-    3: "0xc6ede890317519c2a17cbf1aaf24763c3373b14a5bacd9b12b429d4fa22511df",
-    4: "0x21af7d9b31bb12c704f9b2794e943f55e7727676882227e2a0e1a1870db8e905",
-    5: "0xfc627e2e4bce3d9e8413cb311154ccff512c1949ed035036fa4cff88fede7707",
-    6: "0x440b22e6b4d83d749668fc7e18e24f1c6f9c9d080acbc87478a6167d26c522a7",
-    7: "0x9b216a57c27e7768d87c8191123a40ad88a7b4cea5e8b394c5561b30aae6eb68",
-    8: "0x4e42c377871aa458a1cf29d5ad47a13a8e4086b65aaa62e4a9c2bc850fc1925b",
-    9: "0xe6551f303f58d910489279606532758916887bb0211a3df6fac70b8b3e5b42d4",
-    10: "0x3063f3394c65b44eeca4dbb328da00e54d5fb7ef0d582f8c1c373a49e8612a5d",
-    11: "0xbb458a3a02b86516aca1c5da1e38d3a0840a19aaa7ecfc85cb458164a03b92d2",
-    12: "0xf55d32c3f5c627340a89ee3b997836620d1fd9eef08770d62705534e4268272a",
-    13: "0x0dfd6c0be889a4c6ca773d45e036c8edeabfedcac1e1c858b7955aeea36ff84d",
-    14: "0xe519b9b9c8ee1d7d80cc4b463c101a666fd6d9aa6890713741716e5b5bcb953e",
-    15: "0x16e54c0ca8894085d6dc5ee3f227e48bc613a496a2cb655ddb42217a1de3c0a0",
-    16: "0x5ee8a8a5868d42fbfc8b19fd2c892b66e0596155feaa6632296d38347703ccb2",
-    17: "0x503623b7131c4f82abf4e9b09403a0ad92ccf95c4cdf6389b8a889b0254d2e7d",
-    18: "0xd1665777aa855cf053a3f6a68c2f4791f3d467147eb0083824ea5616e46b9027",
-    19: "0x070e37f5fefda600800308131b1790bccbb218fbeed05e71e513ec24e19e4e0c",
-    20: "0xe67eda8a535e32f3d5fd8eeee1d76f4d936d414ce6d4634114dbfb45103e7b40"
+    3: "0x78f85f6c4a0776e3c7e199327d04bc22da3551e8987e90604c17e2ac53f31dbb",
+    4: "0xd914704437f070927ba9be03c7800f62cb5b759a833ad840c10f596095774ec8",
+    5: "0xe05d8f69465a5a3737ec3817e2f3571e1ca6fa60e123432ce621bc3a6ba17547",
+    6: "0x73811748686f728559094d29ddf4a554979fcd089ba6257add07845ef01b09f6",
+    7: "0x8ca7cc3959ddf836070419ff06521dcaea7704dc383f2b53f2b131c026fcb577",
+    8: "0xe5992340c28d1e354a25bf52fb9f94e7a92f45e34d9d40c0caca984853bd5267",
+    9: "0x191d9a07469adacb33aed7f1ab503d1224488ef0b20f1c53a004175513930476",
+    10: "0xe1702f1e5a7874f7332ff7bc819831d42728583708698ba7c24fe4e16195655a",
+    11: "0x30924ab8279fcf5727fa9fc216764f2cb35ca87d72ed8aa31325d07841459a60",
+    12: "0xf66d95f748d470881d370a8b35024e7e99c079c63ac02743a999b1f658249210",
+    13: "0x6a6050c454ec624e07948be0571e16125b291d12eafb5a7ebda2c291415d68d0",
+    14: "0x2505b899d00565b4defc4e65c7f8108343fd7b2ad36fd62fcd47079432deee64",
+    15: "0x1d40d9688c1504f3b5c4aea3ef764e6a896eda1dbab6fb4f430759d4a321bd53",
+    16: "0xe021083149a8c9b47bd3106b4a326e8388890070ef7a5ad491b1cb021717340a",
+    17: "0x0f51b0e81773b35b6e23916ab18f722e8fdd6dcbba300f69c5b57a1d00127be5",
+    18: "0x8efb899513f705e7532dd00acaa0b5cf231bcbb013e3e1c8f943f1b84df8f6f7",
+    19: "0xf6f82f45818fbc2d5876b1c6e9025a048c6631c741d3ff5dfdf3f975a484cf02",
+    20: "0x5aa865544e1767860c5e22dd7089f599669b1367a773b836fc45be7d637c8421",
+    21: "0xc4f1661d79693b6d9a9e403eda3bc752238d6fe9cc890db4f7914d8b8c7989a5",
+    22: "0xe6d1d4519d9c06e1399fe0e8c4ecbef9e7dbf9f9ba3945434212b837104eabfd",
+    23: "0x98f28b015891388ae5eb86a16736a14aeff2a12bcbec5affcd511c010404ee2c",
+    24: "0x3002ce861e8876ec00e1d7505c8660658178cf786bb1472d3762b587ec8e767f",
+    25: "0xb9f09e4e686707e5f6858c72ffe59ae631cf648b465204f4147ae2aec6c40c75",
+    26: "0xa761354493711a11bb8d991b7ce3954b2746d167060ce86ca9a95e480765992f",
+    27: "0xe51c6876dc199b7d33f23375192e1b2d58ade37423ff6d0dfed91dde764135c6",
+    28: "0xb97c223d75a7d9811b39fca94288de7b43949fd6e73321919cea355b75bafe3c",
+    29: "0x4218d57cbc75c9dfc51e516691ea62784c0ed3a7bc337dd838664f550af564ef",
+    30: "0x25801b002ace177c1982a5320042dd68adf49127eb9b907205974cf278d08f45",
+    31: "0xdfdf96be8a884b0ea0c72fcfad0e6439c221063fd5cca835db1b53b07914448f",
+    32: "0x5b713433befa63603d6fe1a041a35b88dfb52ede659cf66e97390ae995f3d7c9",
+    33: "0xf01e57aebb6b2dab4eae484bb663d53d6e8d8695d8a1d325cf8b4d3b97617b26",
+    34: "0x2d47d0b30b854a89a903f3cc5dd17de331efbb409b73a788c3bb8290801aa6ae",
+    35: "0x59a7ca803e1497244d91ed233317910b4c8899ed1f5bdc0d5cf9e717387940a6",
+    36: "0xa7f98aa71e957b14cb5e01a33885c070192c5e43b5fe25272e1d9ad00b513e47",
+    37: "0xc246fee2a9c14f93a11d378212ea12f0275c866e67a275875f5b7f2e359cd8af",
+    38: "0x56805b827a473a03119726028add5882f40ff87bc3fcf1a404e54b1d008a8f42",
+    39: "0xea3aad76a5d4d3f3cf372b3dc96c16e1c9edb649188aededba60275c11c17092",
+    40: "0xf1259b9115940cb81662c83c1d8195092b395e9a897b2dd79f4eaff4b42f77f0",
+    41: "0xabd33b1053e3ef9861de28ba7736c0df12609c4c1f53f11428b4c0ca4dd210aa",
+    42: "0x899c3b866bbefe0959b37d1cc71fdf63b03b024b1de0f28c7e936f3e3bfd51e4",
+    43: "0x30e6cade82d26e4f22a99e6176b0b7c42f9808e5b2b86de8736c1f69e3069c39",
+    44: "0x93d9eaa82a5f4eccb6e2e4d4efdd7562a7d8e1526272f74e8d428fe33052e38e",
+    45: "0x06e93f9d024332d5918a9b56014f8ae8e654c046b5eb26db4c201498d100e9e4",
+    46: "0x219e4927d0afb57464e9eeae97fbafe9f470d02a6a998f429cf5df8fca78ae5d",
+    47: "0x8c3bb2a8845b82d930d2d4e100764a308536ee623faf24555f03c350f7a1797a",
+    48: "0x3af4f57c110cd106fa1eddace34d79df84bad3413745530508f2216328cbd226",
+    49: "0x4b12254d8b4991d74306a1009ef124ed89954b3efeefb3197400345809500aa8",
+    50: "0xe70f2b0e9109508388130fce88920d4201b281cb01a4fe4710e39e6c5be4af4c"
 }
 
 ACCOUNTS_CONTROL_FILE = "accounts_control.json"
@@ -80,7 +112,7 @@ def reset_accounts_control():
         owner_account = w3.eth.accounts[0]
 
         # Lista de contas que você quer remover
-        ganache_accounts = w3.eth.accounts[3:21]
+        ganache_accounts = w3.eth.accounts[3:51]
 
         for cliente in ganache_accounts:
             # verifica se o cliente está registrado
@@ -289,34 +321,6 @@ def salvar_qr(img, nome_arquivo):
     return caminho
 
 
-def qr_degrade(data):
-    qr = qrcode.make(data).convert("RGBA")
-    width, height = qr.size
-    gradient = Image.new("RGBA", qr.size)
-    for x in range(width):
-        for y in range(height):
-            r = int(255 * (x / width))
-            b = 255 - r
-            gradient.putpixel((x, y), (r, 0, b, 255))
-    pixels_qr = qr.load()
-    pixels_grad = gradient.load()
-    for x in range(width):
-        for y in range(height):
-            if pixels_qr[x, y][0] > 128:
-                pixels_grad[x, y] = (255, 255, 255, 0)
-    caminho = salvar_qr(gradient, "registro_degrade.png")
-    return caminho
-
-
-def qr_padrao(data, nome_arquivo):
-    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4)
-    qr.add_data(data)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    caminho = salvar_qr(img, nome_arquivo)
-    return caminho
-
-
 def sign_n_send(tx, private_key):
     signed_tx = w3.eth.account.sign_transaction(tx, private_key)
     tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
@@ -336,11 +340,56 @@ def extract_interface(compiled_contracts, contract_name):
 
 
 def get_eth_to_brl():
-    url = "https://api.coingecko.com/api/v3/simple/price"
-    params = {"ids": "ethereum", "vs_currencies": "brl"}
-    response = requests.get(url, params=params)
-    data = response.json()
-    return data["ethereum"]["brl"]
+    """
+    Busca a cotação ETH/BRL com fallback robusto em duas fontes.
+
+    Returns:
+        float: Cotação ETH em BRL ou valor padrão em caso de erro.
+    """
+    # Valor padrão de segurança
+    fallback_value = 23500.0
+
+    # --- 1) CoinGecko ---
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {"ids": "ethereum", "vs_currencies": "brl"}
+        response = requests.get(url, params=params, timeout=10)
+
+        print("➡️ URL chamada CoinGecko:", response.url)
+
+        if response.status_code == 200:
+            data = response.json()
+            price = data.get("ethereum", {}).get("brl")
+            if isinstance(price, (int, float)) and price > 0:
+                print(f"✅ Cotação ETH/BRL obtida da CoinGecko: R$ {price:,.2f}")
+                return float(price)
+        else:
+            print(f"❌ CoinGecko retornou status {response.status_code}")
+    except Exception as e:
+        print(f"⚠️ Erro CoinGecko: {str(e)}")
+
+    # --- 2) CryptoCompare ---
+    try:
+        url = "https://min-api.cryptocompare.com/data/price"
+        params = {"fsym": "ETH", "tsyms": "BRL"}
+        response = requests.get(url, params=params, timeout=10)
+
+        print("➡️ URL chamada CryptoCompare:", response.url)
+
+        if response.status_code == 200:
+            data = response.json()
+            price = data.get("BRL")
+            if isinstance(price, (int, float)) and price > 0:
+                print(f"✅ Cotação ETH/BRL obtida da CryptoCompare: R$ {price:,.2f}")
+                return float(price)
+        else:
+            print(f"❌ CryptoCompare retornou status {response.status_code}")
+    except Exception as e:
+        print(f"⚠️ Erro CryptoCompare: {str(e)}")
+
+    # --- 3) Fallback fixo ---
+    print(f"⚠️ Usando valor fallback: R$ {fallback_value:,.2f}")
+    return fallback_value
 
 
 def listAllAccounts():
@@ -362,6 +411,30 @@ def calcular_projecao(investimento_inicial_eth):
         "projecao_30_dias_eth": projecao_30_dias_eth,
         "projecao_1_ano_eth": projecao_1_ano_eth
     }
+
+def gerar_qr_comprovante(receipt_json, tx_id):
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=6,
+        border=4,
+    )
+    qr.add_data(json.dumps(receipt_json, ensure_ascii=False))
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    # Salvar como arquivo
+    pasta = "static/qrs"
+    os.makedirs(pasta, exist_ok=True)
+    caminho = os.path.join(pasta, f"comprovante_{tx_id}.png")
+    img.save(caminho)
+
+    # Também retornar em base64 (para front consumir diretamente)
+    bio = BytesIO()
+    img.save(bio, format="PNG")
+    b64 = base64.b64encode(bio.getvalue()).decode("utf-8")
+
+    return f"data:image/png;base64,{b64}", caminho
 
 
 if __name__ == "__main__":
